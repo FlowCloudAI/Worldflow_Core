@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="DataSourcePerFileMappings">
+    <file url="file://$PROJECT_DIR$/src/db/entry.rs" value="9fe5dfef-5a53-46cb-94b1-d2be4daa0e68" />
+    <file url="file://$PROJECT_DIR$/src/db/project.rs" value="9fe5dfef-5a53-46cb-94b1-d2be4daa0e68" />
+  </component>
+</project>
