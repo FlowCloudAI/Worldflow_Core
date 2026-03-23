@@ -100,6 +100,7 @@ async fn test_entry_with_tags() {
         project_id: project.id.clone(),
         category_id: None,
         title: "艾莉丝".to_string(),
+        summary: None,
         content: Some("# 艾莉丝\n\n主角，魔法少女。".to_string()),
         r#type: Some("character".to_string()),
         tags: Some(vec![EntryTag {
@@ -117,7 +118,9 @@ async fn test_entry_with_tags() {
     assert!(db.search_entries(&project.id, "不存在的关键词xyz", 50).await.unwrap().is_empty());
 
     let updated = db.update_entry(&entry.id, UpdateEntry {
-        title: None, content: None, category_id: None, r#type: None,
+        title: None,
+        summary: None,
+        content: None, category_id: None, r#type: None,
         tags: Some(vec![EntryTag {
             schema_id: schema.id.clone(),
             value: serde_json::json!(99),
@@ -184,6 +187,7 @@ async fn test_inspect_data() {
         project_id: project.id.clone(),
         category_id: Some(cat_hero.id.clone()),
         title: "哈里·谢顿".to_string(),
+        summary: None,
         content: Some("# 哈里·谢顿\n\n心理史学的创始人，银河帝国末期的数学家。".to_string()),
         r#type: Some("character".to_string()),
         tags: Some(vec![EntryTag {
