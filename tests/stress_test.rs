@@ -90,6 +90,7 @@ async fn stress_write_and_query() {
                 project_id:  project.id.clone(),
                 category_id: category_ids.get(ei % category_ids.len()).cloned(),
                 title:       random_string("词条", pi * N_ENTRIES + ei),
+                summary: Some(format!("这是第 {} 个词条的简要说明，属于项目 {}。", ei, pi)),
                 content:     Some(format!(
                     "# {}\n\n这是第 {} 个词条的内容，属于项目 {}。\n\n详细描述内容在这里。",
                     random_string("词条", ei), ei, pi,
