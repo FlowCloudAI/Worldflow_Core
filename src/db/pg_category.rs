@@ -1,13 +1,13 @@
 use sqlx::Row;
 use uuid::Uuid;
 use crate::{
-    db::SqliteDb,
+    db::PgDb,
     error::{Result, WorldflowError},
     models::{Category, CreateCategory, UpdateCategory},
 };
 use super::traits::CategoryOps;
 
-fn row_to_category(row: &sqlx::sqlite::SqliteRow) -> Result<Category> {
+fn row_to_category(row: &sqlx::postgres::PgRow) -> Result<Category> {
     Ok(Category {
         id:         row.try_get("id")?,
         project_id: row.try_get("project_id")?,
@@ -19,22 +19,21 @@ fn row_to_category(row: &sqlx::sqlite::SqliteRow) -> Result<Category> {
     })
 }
 
-impl CategoryOps for SqliteDb {
+impl CategoryOps for PgDb {
     async fn would_create_cycle(&self, id: &str, new_parent_id: &str) -> Result<bool> {
         let row = sqlx::query(
             "WITH RECURSIVE descendants(id) AS (
-             SELECT id FROM categories WHERE id = ?
+             SELECT id FROM categories WHERE id = $1
              UNION ALL
              SELECT c.id FROM categories c
              JOIN descendants d ON c.parent_id = d.id
          )
-         SELECT COUNT(*) as cnt FROM descendants WHERE id = ?"
+         SELECT COUNT(*) as cnt FROM descendants WHERE id = $2"
         )
             .bind(id)
             .bind(new_parent_id)
             .fetch_one(&self.pool)
             .await?;
-
         let cnt: i64 = row.try_get("cnt")?;
         Ok(cnt > 0)
     }
@@ -44,8 +43,8 @@ impl CategoryOps for SqliteDb {
         let sort_order = input.sort_order.unwrap_or(0);
         let row = sqlx::query(
             "INSERT INTO categories (id, project_id, parent_id, name, sort_order)
-             VALUES (?, ?, ?, ?, ?)
-             RETURNING id, project_id, parent_id, name, sort_order, created_at, updated_at"
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id, project_id, parent_id, name, sort_order, created_at::TEXT, updated_at::TEXT"
         )
             .bind(&id)
             .bind(&input.project_id)
@@ -59,8 +58,8 @@ impl CategoryOps for SqliteDb {
 
     async fn get_category(&self, id: &str) -> Result<Category> {
         let row = sqlx::query(
-            "SELECT id, project_id, parent_id, name, sort_order, created_at, updated_at
-             FROM categories WHERE id = ?"
+            "SELECT id, project_id, parent_id, name, sort_order, created_at::TEXT, updated_at::TEXT
+             FROM categories WHERE id = $1"
         )
             .bind(id)
             .fetch_optional(&self.pool)
@@ -71,10 +70,10 @@ impl CategoryOps for SqliteDb {
 
     async fn list_categories(&self, project_id: &str) -> Result<Vec<Category>> {
         let rows = sqlx::query(
-            "SELECT id, project_id, parent_id, name, sort_order, created_at, updated_at
+            "SELECT id, project_id, parent_id, name, sort_order, created_at::TEXT, updated_at::TEXT
              FROM categories
-             WHERE project_id = ?
-             ORDER BY parent_id NULLS FIRST, sort_order , name "
+             WHERE project_id = $1
+             ORDER BY parent_id NULLS FIRST, sort_order, name"
         )
             .bind(project_id)
             .fetch_all(&self.pool)
@@ -94,24 +93,23 @@ impl CategoryOps for SqliteDb {
         let row = match input.parent_id {
             None => sqlx::query(
                 "UPDATE categories
-                 SET name       = COALESCE(?, name),
-                     sort_order = COALESCE(?, sort_order)
-                 WHERE id = ?
-                 RETURNING id, project_id, parent_id, name, sort_order, created_at, updated_at"
+                 SET name       = COALESCE($1, name),
+                     sort_order = COALESCE($2, sort_order)
+                 WHERE id = $3
+                 RETURNING id, project_id, parent_id, name, sort_order, created_at::TEXT, updated_at::TEXT"
             )
                 .bind(&input.name)
                 .bind(input.sort_order)
                 .bind(id)
                 .fetch_one(&self.pool)
                 .await?,
-
             Some(new_parent) => sqlx::query(
                 "UPDATE categories
-                 SET parent_id  = ?,
-                     name       = COALESCE(?, name),
-                     sort_order = COALESCE(?, sort_order)
-                 WHERE id = ?
-                 RETURNING id, project_id, parent_id, name, sort_order, created_at, updated_at"
+                 SET parent_id  = $1,
+                     name       = COALESCE($2, name),
+                     sort_order = COALESCE($3, sort_order)
+                 WHERE id = $4
+                 RETURNING id, project_id, parent_id, name, sort_order, created_at::TEXT, updated_at::TEXT"
             )
                 .bind(new_parent)
                 .bind(&input.name)
@@ -124,7 +122,7 @@ impl CategoryOps for SqliteDb {
     }
 
     async fn delete_category(&self, id: &str) -> Result<()> {
-        let result = sqlx::query("DELETE FROM categories WHERE id = ?")
+        let result = sqlx::query("DELETE FROM categories WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
             .await?;

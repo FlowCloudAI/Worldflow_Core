@@ -1,24 +1,36 @@
+pub mod traits;
+
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 
 #[cfg(feature = "postgres")]
 pub mod postgres;
 
+// ── SQLite 实现 ──────────────────────────────────────────
+#[cfg(feature = "sqlite")]
+mod category;
+#[cfg(feature = "sqlite")]
+mod entry;
+#[cfg(feature = "sqlite")]
+mod entry_relation;
+#[cfg(feature = "sqlite")]
+mod project;
+#[cfg(feature = "sqlite")]
+mod tag_schema;
+
 use sysinfo::System;
 use crate::error::Result;
-use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
 
-pub mod app_setting;
-pub mod category;
-pub mod entry;
-pub mod project;
-pub mod tag_schema;
+#[cfg(feature = "sqlite")]
+use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
+#[cfg(feature = "sqlite")]
 #[derive(Clone, Debug)]
 pub struct SqliteDb {
     pub pool: SqlitePool,
 }
 
+#[cfg(feature = "sqlite")]
 impl SqliteDb {
     pub async fn new(database_url: &str) -> Result<Self> {
         let pool = SqlitePoolOptions::new()
@@ -30,37 +42,25 @@ impl SqliteDb {
         sqlx::query("PRAGMA journal_mode = WAL;").execute(&pool).await?;
         sqlx::query("PRAGMA synchronous = NORMAL;").execute(&pool).await?;
 
-        // 先跑 migration，app_settings 表才存在
         sqlx::migrate!("./migrations").run(&pool).await?;
 
-        // 读用户配置，fallback 到自动检测
-        let memory_mb = Self::resolve_memory_limit(&pool).await;
+        let memory_mb = Self::get_available_memory();
         Self::apply_memory_pragmas(&pool, memory_mb).await?;
 
         Ok(Self { pool })
     }
 
-    async fn resolve_memory_limit(pool: &SqlitePool) -> u64 {
-        // 读用户设置
-        let row = sqlx::query("SELECT value FROM app_settings WHERE key = 'memory_limit_mb'")
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten();
+    pub async fn optimize_fts(&self) -> Result<()> {
+        sqlx::query("INSERT INTO entries_fts(entries_fts) VALUES('optimize');")
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
 
-        if let Some(row) = row {
-            let val: String = row.try_get("value").unwrap_or_default();
-            if val != "auto" {
-                if let Ok(mb) = val.parse::<u64>() {
-                    return mb;
-                }
-            }
-        }
-
-        // 自动检测
+    fn get_available_memory() -> u64 {
         let mut sys = System::new_all();
         sys.refresh_memory();
-        sys.available_memory() / 1024 / 1024  // 转换为 MB
+        sys.available_memory() / 1024 / 1024
     }
 
     async fn apply_memory_pragmas(pool: &SqlitePool, available_mb: u64) -> Result<()> {
@@ -79,5 +79,40 @@ impl SqliteDb {
         sqlx::query(&format!("PRAGMA temp_store = {temp_store};")).execute(pool).await?;
 
         Ok(())
+    }
+}
+
+// ── PostgreSQL 实现 ──────────────────────────────────────
+#[cfg(feature = "postgres")]
+mod pg_category;
+#[cfg(feature = "postgres")]
+mod pg_entry;
+#[cfg(feature = "postgres")]
+mod pg_entry_relation;
+#[cfg(feature = "postgres")]
+mod pg_project;
+#[cfg(feature = "postgres")]
+mod pg_tag_schema;
+
+#[cfg(feature = "postgres")]
+use sqlx::{postgres::PgPoolOptions, PgPool};
+
+#[cfg(feature = "postgres")]
+#[derive(Clone, Debug)]
+pub struct PgDb {
+    pub pool: PgPool,
+}
+
+#[cfg(feature = "postgres")]
+impl PgDb {
+    pub async fn new(database_url: &str) -> Result<Self> {
+        let pool = PgPoolOptions::new()
+            .max_connections(10)
+            .connect(database_url)
+            .await?;
+
+        sqlx::migrate!("./migrations_pg").run(&pool).await?;
+
+        Ok(Self { pool })
     }
 }

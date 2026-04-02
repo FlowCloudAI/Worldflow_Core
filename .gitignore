@@ -1,2 +1,8 @@
 /target
 worldflow_dev.db
+/worldflow_dev.db-wal
+/worldflow_dev.db-shm
+/worldflow_dev.db
+/.sqlx/
+/.claude/
+/.idea/

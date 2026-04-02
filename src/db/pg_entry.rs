@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use crate::{
-    db::SqliteDb,
+    db::PgDb,
     error::{Result, WorldflowError},
     models::{CreateEntry, Entry, EntryBrief, UpdateEntry},
 };
@@ -8,7 +8,7 @@ use sqlx::Row;
 use uuid::Uuid;
 use super::traits::EntryOps;
 
-fn row_to_entry(row: &sqlx::sqlite::SqliteRow) -> Result<Entry> {
+fn row_to_entry(row: &sqlx::postgres::PgRow) -> Result<Entry> {
     let tags_str: String   = row.try_get("tags")?;
     let images_str: String = row.try_get("images")?;
     Ok(Entry {
@@ -27,7 +27,7 @@ fn row_to_entry(row: &sqlx::sqlite::SqliteRow) -> Result<Entry> {
     })
 }
 
-fn row_to_entry_brief(row: &sqlx::sqlite::SqliteRow) -> Result<EntryBrief> {
+fn row_to_entry_brief(row: &sqlx::postgres::PgRow) -> Result<EntryBrief> {
     let cover_str: Option<String> = row.try_get("cover_path")?;
     Ok(EntryBrief {
         id:          row.try_get("id")?,
@@ -41,25 +41,21 @@ fn row_to_entry_brief(row: &sqlx::sqlite::SqliteRow) -> Result<EntryBrief> {
     })
 }
 
-impl EntryOps for SqliteDb {
+impl EntryOps for PgDb {
     async fn count_entries(&self, project_id: &str, category_id: Option<&str>) -> Result<i64> {
-        let row =
-            match category_id {
-                Some(cid) => sqlx::query(
-                    "SELECT COUNT(*) as cnt FROM entries WHERE project_id = ? AND category_id = ?",
-                )
+        let row = match category_id {
+            Some(cid) => sqlx::query(
+                "SELECT COUNT(*) as cnt FROM entries WHERE project_id = $1 AND category_id = $2",
+            )
                 .bind(project_id)
                 .bind(cid)
                 .fetch_one(&self.pool)
                 .await?,
-
-                None => {
-                    sqlx::query("SELECT COUNT(*) as cnt FROM entries WHERE project_id = ?")
-                        .bind(project_id)
-                        .fetch_one(&self.pool)
-                        .await?
-                }
-            };
+            None => sqlx::query("SELECT COUNT(*) as cnt FROM entries WHERE project_id = $1")
+                .bind(project_id)
+                .fetch_one(&self.pool)
+                .await?,
+        };
         Ok(row.try_get("cnt")?)
     }
 
@@ -73,8 +69,8 @@ impl EntryOps for SqliteDb {
 
         let row = sqlx::query(
             "INSERT INTO entries (id, project_id, category_id, title, summary, content, type, tags, images, cover_path)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         RETURNING id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at, updated_at"
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             RETURNING id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at::TEXT, updated_at::TEXT"
         )
             .bind(&id)
             .bind(&input.project_id)
@@ -94,8 +90,8 @@ impl EntryOps for SqliteDb {
 
     async fn get_entry(&self, id: &str) -> Result<Entry> {
         let row = sqlx::query(
-            "SELECT id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at, updated_at
-            FROM entries WHERE id = ?"
+            "SELECT id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at::TEXT, updated_at::TEXT
+             FROM entries WHERE id = $1"
         )
             .bind(id)
             .fetch_optional(&self.pool)
@@ -116,36 +112,31 @@ impl EntryOps for SqliteDb {
         let offset = offset as i64;
 
         let rows = match category_id {
-            Some(cid) => {
-                sqlx::query(
-                    "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
-                    FROM entries
-                    WHERE project_id = ? AND category_id = ?
-                    ORDER BY updated_at DESC
-                    LIMIT ? OFFSET ?",
-                )
+            Some(cid) => sqlx::query(
+                "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at::TEXT
+                 FROM entries
+                 WHERE project_id = $1 AND category_id = $2
+                 ORDER BY updated_at DESC
+                 LIMIT $3 OFFSET $4",
+            )
                 .bind(project_id)
                 .bind(cid)
                 .bind(limit)
                 .bind(offset)
                 .fetch_all(&self.pool)
-                .await?
-            }
-
-            None => {
-                sqlx::query(
-                    "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
-                    FROM entries
-                    WHERE project_id = ?
-                    ORDER BY updated_at DESC
-                    LIMIT ? OFFSET ?",
-                )
+                .await?,
+            None => sqlx::query(
+                "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at::TEXT
+                 FROM entries
+                 WHERE project_id = $1
+                 ORDER BY updated_at DESC
+                 LIMIT $2 OFFSET $3",
+            )
                 .bind(project_id)
                 .bind(limit)
                 .bind(offset)
                 .fetch_all(&self.pool)
-                .await?
-            }
+                .await?,
         };
 
         rows.iter().map(row_to_entry_brief).collect()
@@ -160,18 +151,19 @@ impl EntryOps for SqliteDb {
         let limit = limit as i64;
 
         let rows = sqlx::query(
-            "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
-                    FROM entries
-                    WHERE project_id = ?
-                    AND rowid IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)
-                    ORDER BY updated_at DESC
-                    LIMIT ?",
+            "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at::TEXT
+             FROM entries
+             WHERE project_id = $1
+               AND to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(content,''))
+                   @@ plainto_tsquery('simple', $2)
+             ORDER BY updated_at DESC
+             LIMIT $3",
         )
-        .bind(project_id)
-        .bind(query)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?;
+            .bind(project_id)
+            .bind(query)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
 
         rows.iter().map(row_to_entry_brief).collect()
     }
@@ -194,16 +186,16 @@ impl EntryOps for SqliteDb {
 
         let row = sqlx::query(
             "UPDATE entries
-         SET title       = COALESCE(?, title),
-             summary     = COALESCE(?, summary),
-             content     = COALESCE(?, content),
-             category_id = CASE WHEN ? THEN ? ELSE category_id END,
-             type        = CASE WHEN ? THEN ? ELSE type END,
-             tags        = COALESCE(?, tags),
-             images      = COALESCE(?, images),
-             cover_path  = CASE WHEN ? THEN ? ELSE cover_path END
-         WHERE id = ?
-         RETURNING id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at, updated_at"
+             SET title       = COALESCE($1, title),
+                 summary     = COALESCE($2, summary),
+                 content     = COALESCE($3, content),
+                 category_id = CASE WHEN $4 THEN $5 ELSE category_id END,
+                 type        = CASE WHEN $6 THEN $7 ELSE type END,
+                 tags        = COALESCE($8, tags),
+                 images      = COALESCE($9, images),
+                 cover_path  = CASE WHEN $10 THEN $11 ELSE cover_path END
+             WHERE id = $12
+             RETURNING id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at::TEXT, updated_at::TEXT"
         )
             .bind(&input.title)
             .bind(&input.summary)
@@ -224,11 +216,10 @@ impl EntryOps for SqliteDb {
     }
 
     async fn delete_entry(&self, id: &str) -> Result<()> {
-        let result = sqlx::query("DELETE FROM entries WHERE id = ?")
+        let result = sqlx::query("DELETE FROM entries WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
             .await?;
-
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("entry {id}")));
         }
@@ -249,7 +240,7 @@ impl EntryOps for SqliteDb {
 
             sqlx::query(
                 "INSERT INTO entries (id, project_id, category_id, title, summary, content, type, tags, images, cover_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
             )
                 .bind(&id)
                 .bind(&input.project_id)

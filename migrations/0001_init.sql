@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS projects (
                                         id          TEXT PRIMARY KEY,
                                         name        TEXT NOT NULL,
                                         description TEXT,
+                                        cover_path  TEXT,
                                         created_at  TEXT NOT NULL DEFAULT (datetime('now')),
                                         updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS entries (
                                        project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                                        category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
                                        title       TEXT NOT NULL,
+                                       summary     TEXT,
                                        content     TEXT NOT NULL DEFAULT '',
                                        type        TEXT,
                                        tags        TEXT NOT NULL DEFAULT '[]',
@@ -53,10 +55,16 @@ CREATE TABLE IF NOT EXISTS entries (
                                        updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS app_settings (
-                                            key        TEXT PRIMARY KEY,
-                                            value      TEXT NOT NULL,
-                                            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+CREATE TABLE IF NOT EXISTS entry_relations (
+                                               id         TEXT PRIMARY KEY,
+                                               project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                                               a_id       TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+                                               b_id       TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+                                               relation   TEXT NOT NULL CHECK(relation IN ('one_way', 'two_way')),
+                                               content    TEXT NOT NULL,
+                                               created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                                               updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                                               UNIQUE (a_id, b_id, content)
 );
 
 -- entries: 防止 category_id 跨项目（INSERT）
@@ -86,6 +94,16 @@ BEGIN
     WHERE (SELECT project_id FROM categories WHERE id = NEW.category_id) != NEW.project_id;
 END;
 
+-- entry_relations: 防止 a_id/b_id 跨项目
+CREATE TRIGGER IF NOT EXISTS relations_same_project_insert
+    BEFORE INSERT ON entry_relations
+BEGIN
+    SELECT RAISE(ABORT, 'a_id must belong to same project')
+    WHERE (SELECT project_id FROM entries WHERE id = NEW.a_id) != NEW.project_id;
+    SELECT RAISE(ABORT, 'b_id must belong to same project')
+    WHERE (SELECT project_id FROM entries WHERE id = NEW.b_id) != NEW.project_id;
+END;
+
 -- updated_at triggers
 CREATE TRIGGER IF NOT EXISTS projects_updated_at
     AFTER UPDATE ON projects
@@ -103,9 +121,9 @@ CREATE TRIGGER IF NOT EXISTS entries_updated_at
     AFTER UPDATE ON entries
 BEGIN UPDATE entries SET updated_at = datetime('now') WHERE id = NEW.id; END;
 
-CREATE TRIGGER IF NOT EXISTS app_settings_updated_at
-    AFTER UPDATE ON app_settings
-BEGIN UPDATE app_settings SET updated_at = datetime('now') WHERE key = NEW.key; END;
+CREATE TRIGGER IF NOT EXISTS entry_relations_updated_at
+    AFTER UPDATE ON entry_relations
+BEGIN UPDATE entry_relations SET updated_at = datetime('now') WHERE id = NEW.id; END;
 
 -- 普通索引
 CREATE INDEX IF NOT EXISTS idx_entries_project         ON entries(project_id);
@@ -115,6 +133,9 @@ CREATE INDEX IF NOT EXISTS idx_entries_project_updated ON entries(project_id, up
 CREATE INDEX IF NOT EXISTS idx_categories_project      ON categories(project_id);
 CREATE INDEX IF NOT EXISTS idx_categories_parent       ON categories(parent_id);
 CREATE INDEX IF NOT EXISTS idx_tag_schemas_project     ON tag_schemas(project_id);
+CREATE INDEX IF NOT EXISTS idx_relations_a             ON entry_relations(a_id);
+CREATE INDEX IF NOT EXISTS idx_relations_b             ON entry_relations(b_id);
+CREATE INDEX IF NOT EXISTS idx_relations_project       ON entry_relations(project_id);
 
 -- FTS5 全文搜索
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(

@@ -1,12 +1,10 @@
-use worldflow_core::{SqliteDb, models::*, ProjectOps, CategoryOps, EntryOps, TagSchemaOps, EntryRelationOps};
+use worldflow_core::{PgDb, models::*, ProjectOps, CategoryOps, EntryOps, TagSchemaOps, EntryRelationOps};
 use std::{collections::HashMap, time::Instant};
 
-async fn setup() -> SqliteDb {
-    let db_path = format!(
-        "sqlite:{}/worldflow_dev.db?mode=rwc",
-        env!("CARGO_MANIFEST_DIR").replace('\\', "/")
-    );
-    SqliteDb::new(&db_path).await.unwrap()
+async fn setup() -> PgDb {
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:password@localhost/worldflow_dev".to_string());
+    PgDb::new(&database_url).await.unwrap()
 }
 
 fn random_string(prefix: &str, i: usize) -> String {
@@ -14,9 +12,8 @@ fn random_string(prefix: &str, i: usize) -> String {
 }
 
 #[tokio::test]
-async fn stress_write_and_query() {
+async fn stress_write_and_query_pg() {
     let db = setup().await;
-
 
     const N_PROJECTS:   usize = 50;
     const N_CATEGORIES: usize = 100;
@@ -104,12 +101,11 @@ async fn stress_write_and_query() {
         }).collect();
         db.create_entries_bulk(bulk_inputs).await.unwrap();
     }
-    db.optimize_fts().await.unwrap();
 
     let write_elapsed = t0.elapsed();
     let total_written = N_PROJECTS * (N_CATEGORIES + N_SCHEMAS + N_ENTRIES);
     println!(
-        "\n写入完成: {} 条记录，耗时 {:.2}s，平均 {:.2}ms/条",
+        "\n写入完成：{} 条记录，耗时 {:.2}s，平均 {:.2}ms/条",
         total_written,
         write_elapsed.as_secs_f64(),
         write_elapsed.as_millis() as f64 / total_written as f64,
@@ -219,7 +215,7 @@ async fn stress_write_and_query() {
     for brief in &sample {
         assert!(brief.cover.is_some(), "封面图应当存在");
     }
-    println!("cover 提取验证: {} 条均有封面", sample.len());
+    println!("cover 提取验证：{} 条均有封面", sample.len());
 
     // ── 关系查询 ──────────────────────────────────────────────
     let t_rel_read = Instant::now();
@@ -273,5 +269,5 @@ async fn stress_write_and_query() {
         assert!(db.list_relations_for_project(pid).await.unwrap().is_empty());
     }
 
-    println!("\n总写入: {} 词条 across {} 项目", N_PROJECTS * N_ENTRIES, N_PROJECTS);
+    println!("\n总写入：{} 词条 across {} 项目", N_PROJECTS * N_ENTRIES, N_PROJECTS);
 }

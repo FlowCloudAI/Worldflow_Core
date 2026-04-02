@@ -1,13 +1,13 @@
 use sqlx::Row;
 use uuid::Uuid;
 use crate::{
-    db::SqliteDb,
+    db::PgDb,
     error::{Result, WorldflowError},
     models::{CreateTagSchema, TagSchema},
 };
 use super::traits::TagSchemaOps;
 
-fn row_to_tag_schema(row: &sqlx::sqlite::SqliteRow) -> Result<TagSchema> {
+fn row_to_tag_schema(row: &sqlx::postgres::PgRow) -> Result<TagSchema> {
     Ok(TagSchema {
         id:          row.try_get("id")?,
         project_id:  row.try_get("project_id")?,
@@ -24,7 +24,7 @@ fn row_to_tag_schema(row: &sqlx::sqlite::SqliteRow) -> Result<TagSchema> {
     })
 }
 
-impl TagSchemaOps for SqliteDb {
+impl TagSchemaOps for PgDb {
     async fn create_tag_schema(&self, input: CreateTagSchema) -> Result<TagSchema> {
         if let Some(ref val) = input.default_val {
             if input.r#type == "number" && val.parse::<f64>().is_err() {
@@ -46,9 +46,9 @@ impl TagSchemaOps for SqliteDb {
         let row = sqlx::query(
             "INSERT INTO tag_schemas
              (id, project_id, name, description, type, target, default_val, range_min, range_max, sort_order)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
              RETURNING id, project_id, name, description, type, target,
-                       default_val, range_min, range_max, sort_order, created_at, updated_at"
+                       default_val, range_min, range_max, sort_order, created_at::TEXT, updated_at::TEXT"
         )
             .bind(&id)
             .bind(&input.project_id)
@@ -69,8 +69,8 @@ impl TagSchemaOps for SqliteDb {
     async fn get_tag_schema(&self, id: &str) -> Result<TagSchema> {
         let row = sqlx::query(
             "SELECT id, project_id, name, description, type, target,
-                    default_val, range_min, range_max, sort_order, created_at, updated_at
-             FROM tag_schemas WHERE id = ?"
+                    default_val, range_min, range_max, sort_order, created_at::TEXT, updated_at::TEXT
+             FROM tag_schemas WHERE id = $1"
         )
             .bind(id)
             .fetch_optional(&self.pool)
@@ -83,10 +83,10 @@ impl TagSchemaOps for SqliteDb {
     async fn list_tag_schemas(&self, project_id: &str) -> Result<Vec<TagSchema>> {
         let rows = sqlx::query(
             "SELECT id, project_id, name, description, type, target,
-                    default_val, range_min, range_max, sort_order, created_at, updated_at
+                    default_val, range_min, range_max, sort_order, created_at::TEXT, updated_at::TEXT
              FROM tag_schemas
-             WHERE project_id = ?
-             ORDER BY sort_order , name "
+             WHERE project_id = $1
+             ORDER BY sort_order, name"
         )
             .bind(project_id)
             .fetch_all(&self.pool)
@@ -101,17 +101,17 @@ impl TagSchemaOps for SqliteDb {
 
         let row = sqlx::query(
             "UPDATE tag_schemas
-             SET name        = ?,
-                 description = ?,
-                 type        = ?,
-                 target      = ?,
-                 default_val = ?,
-                 range_min   = ?,
-                 range_max   = ?,
-                 sort_order  = COALESCE(?, sort_order)
-             WHERE id = ?
+             SET name        = $1,
+                 description = $2,
+                 type        = $3,
+                 target      = $4,
+                 default_val = $5,
+                 range_min   = $6,
+                 range_max   = $7,
+                 sort_order  = COALESCE($8, sort_order)
+             WHERE id = $9
              RETURNING id, project_id, name, description, type, target,
-                       default_val, range_min, range_max, sort_order, created_at, updated_at"
+                       default_val, range_min, range_max, sort_order, created_at::TEXT, updated_at::TEXT"
         )
             .bind(&input.name)
             .bind(&input.description)
@@ -129,11 +129,10 @@ impl TagSchemaOps for SqliteDb {
     }
 
     async fn delete_tag_schema(&self, id: &str) -> Result<()> {
-        let result = sqlx::query("DELETE FROM tag_schemas WHERE id = ?")
+        let result = sqlx::query("DELETE FROM tag_schemas WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
             .await?;
-
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("tag_schema {id}")));
         }

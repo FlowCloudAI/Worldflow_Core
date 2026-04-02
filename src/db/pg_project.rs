@@ -1,13 +1,13 @@
 use sqlx::Row;
 use uuid::Uuid;
 use crate::{
-    db::SqliteDb,
+    db::PgDb,
     error::{Result, WorldflowError},
     models::{CreateProject, Project, UpdateProject},
 };
 use super::traits::ProjectOps;
 
-fn row_to_project(row: &sqlx::sqlite::SqliteRow) -> Result<Project> {
+fn row_to_project(row: &sqlx::postgres::PgRow) -> Result<Project> {
     Ok(Project {
         id:          row.try_get("id")?,
         name:        row.try_get("name")?,
@@ -17,13 +17,13 @@ fn row_to_project(row: &sqlx::sqlite::SqliteRow) -> Result<Project> {
     })
 }
 
-impl ProjectOps for SqliteDb {
+impl ProjectOps for PgDb {
     async fn create_project(&self, input: CreateProject) -> Result<Project> {
         let id = Uuid::new_v4().to_string();
         let row = sqlx::query(
             "INSERT INTO projects (id, name, description)
-             VALUES (?, ?, ?)
-             RETURNING id, name, description, created_at, updated_at"
+             VALUES ($1, $2, $3)
+             RETURNING id, name, description, created_at::TEXT, updated_at::TEXT"
         )
             .bind(&id)
             .bind(&input.name)
@@ -35,8 +35,8 @@ impl ProjectOps for SqliteDb {
 
     async fn get_project(&self, id: &str) -> Result<Project> {
         let row = sqlx::query(
-            "SELECT id, name, description, created_at, updated_at
-             FROM projects WHERE id = ?"
+            "SELECT id, name, description, created_at::TEXT, updated_at::TEXT
+             FROM projects WHERE id = $1"
         )
             .bind(id)
             .fetch_optional(&self.pool)
@@ -47,7 +47,7 @@ impl ProjectOps for SqliteDb {
 
     async fn list_projects(&self) -> Result<Vec<Project>> {
         let rows = sqlx::query(
-            "SELECT id, name, description, created_at, updated_at
+            "SELECT id, name, description, created_at::TEXT, updated_at::TEXT
              FROM projects ORDER BY created_at DESC"
         )
             .fetch_all(&self.pool)
@@ -59,10 +59,10 @@ impl ProjectOps for SqliteDb {
         self.get_project(id).await?;
         let row = sqlx::query(
             "UPDATE projects
-             SET name        = COALESCE(?, name),
-                 description = COALESCE(?, description)
-             WHERE id = ?
-             RETURNING id, name, description, created_at, updated_at"
+             SET name        = COALESCE($1, name),
+                 description = COALESCE($2, description)
+             WHERE id = $3
+             RETURNING id, name, description, created_at::TEXT, updated_at::TEXT"
         )
             .bind(&input.name)
             .bind(&input.description)
@@ -73,7 +73,7 @@ impl ProjectOps for SqliteDb {
     }
 
     async fn delete_project(&self, id: &str) -> Result<()> {
-        let result = sqlx::query("DELETE FROM projects WHERE id = ?")
+        let result = sqlx::query("DELETE FROM projects WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
             .await?;

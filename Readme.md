@@ -8,12 +8,12 @@ Worldflow_core 是**世界观管理系统**的核心 Rust 库，提供：
 - 🏢 项目（Project）：组织多个世界观
 - 🗂️ 分类（Category）：树状结构分类词条
 - 🏷️ 标签系统（TagSchema）：灵活的元数据标记
-- ⚙️ 应用设置（AppSetting）：全局配置管理
+- 🔗 词条关系（EntryRelation）：词条间的关联和网络
 
 ### 核心特性
 | 特性 | 说明 |
 |------|------|
-| **数据库** | SQLite（生产就绪）+ PostgreSQL（规划中） |
+| **数据库** | SQLite（生产就绪）+ PostgreSQL（已实现，feature flag 控制） |
 | **性能** | 自适应内存管理、FTS全文搜索、WAL 日志 |
 | **安全** | 外键约束、循环检测、事务支持 |
 | **灵活** | JSON 存储、树状分类、自定义标签 |
@@ -57,7 +57,7 @@ async fn main() -> Result<()> {
 | Category | 分类（树状） | parent_id, sort_order |
 | Entry | 词条内容 | title, content, tags, images |
 | TagSchema | 标签定义 | type(number/string/boolean), target |
-| AppSetting | 全局配置 | key, value |
+| EntryRelation | 词条关系 | a_id, b_id, relation(one_way/two_way) |
 
 ---
 
@@ -77,24 +77,27 @@ Worldflow_core 是为内容创作者（小说、游戏、知识库）设计的**
 ### 1.2 主要模块
 ```
 worldflow_core/
-├── models/          # 数据模型定义
-│   ├── project.rs      # 项目
-│   ├── category.rs     # 分类
-│   ├── entry.rs        # 词条
-│   ├── tag_schema.rs   # 标签定义
-│   └── app_setting.rs  # 应用设置
-├── db/              # 数据库实现
-│   ├── mod.rs          # SQLite 核心
-│   ├── sqlite.rs       # SQLite 特定实现（预留）
-│   ├── postgres.rs     # PostgreSQL 实现（规划中）
-│   └── [各模块]/
-│       ├── app_setting.rs
-│       ├── category.rs
-│       ├── entry.rs
-│       ├── project.rs
-│       └── tag_schema.rs
-├── error.rs         # 错误定义
-└── lib.rs          # 库入口
+├── models/                 # 数据模型定义
+│   ├── project.rs
+│   ├── category.rs
+│   ├── entry.rs
+│   ├── tag_schema.rs
+│   └── entry_relation.rs
+├── db/                     # 数据库实现
+│   ├── mod.rs              # SqliteDb / PgDb 结构体 + 初始化
+│   ├── traits.rs           # Db trait 定义（ProjectOps 等）
+│   ├── project.rs          # SQLite 实现
+│   ├── category.rs
+│   ├── entry.rs
+│   ├── tag_schema.rs
+│   ├── entry_relation.rs
+│   ├── pg_project.rs       # PostgreSQL 实现
+│   ├── pg_category.rs
+│   ├── pg_entry.rs
+│   ├── pg_tag_schema.rs
+│   └── pg_entry_relation.rs
+├── error.rs                # 错误定义
+└── lib.rs                  # 库入口 + trait 重导出
 ```
 
 ---
@@ -112,7 +115,9 @@ Project (项目)
   │   └── images[]
   ├── TagSchema (标签定义)
   │   └── target: ["character", "item", ...]
-  └── AppSetting (项目级设置)
+  └── EntryRelation (词条关系)
+      ├── a_id → Entry
+      └── b_id → Entry
 ```
 
 ### 2.2 Project（项目）
@@ -123,6 +128,7 @@ pub struct Project {
     pub id: String,                    // UUID
     pub name: String,                  // 项目名称
     pub description: Option<String>,   // 描述
+    pub cover_path: Option<String>,    // 项目封面路径
     pub created_at: String,            // 创建时间
     pub updated_at: String,            // 更新时间
 }
@@ -134,8 +140,9 @@ CREATE TABLE projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    cover_path TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
 
@@ -363,32 +370,61 @@ db.update_tag_schema(&schema_id, CreateTagSchema { ... }).await?;
 db.delete_tag_schema(&schema_id).await?;
 ```
 
-### 2.6 AppSetting（应用设置）
-**作用：** 全局配置 KV 存储
+### 2.6 EntryRelation（词条关系）
+**作用：** 建立词条间的关联关系（如人物关系、情节线索等）
 
 ```rust
-pub struct AppSetting {
-    pub key: String,       // 配置键
-    pub value: String,     // 配置值
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RelationDirection {
+    OneWay,  // 单向关系 (A → B)
+    TwoWay,  // 双向关系 (A ↔ B)
+}
+
+pub struct EntryRelation {
+    pub id:         String,              // UUID
+    pub project_id: String,              // 所属项目
+    pub a_id:       String,              // 词条A（源）
+    pub b_id:       String,              // 词条B（目标）
+    pub relation:   RelationDirection,   // 关系方向
+    pub content:    String,              // 关系描述
+    pub created_at: String,
     pub updated_at: String,
 }
 ```
 
-**内置配置项：**
-| 键 | 值 | 说明 |
-|----|-----|------|
-| `memory_limit_mb` | 数字 or "auto" | SQLite 内存限制 |
+**关键特性：**
+- ✅ 单向/双向关系：灵活描述不同关系类型
+- ✅ 关系内容：自由文本描述关系的具体内容
+- ✅ 跨项目检查：确保关联的词条属于同一项目
 
 **常用操作：**
 ```rust
-// 读取设置
-let val = db.get_setting("memory_limit_mb").await?;
+// 创建关系
+db.create_relation(CreateEntryRelation {
+    project_id: proj_id,
+    a_id: char1_id,
+    b_id: char2_id,
+    relation: RelationDirection::TwoWay,
+    content: "相互爱恋的恋人".to_string(),
+}).await?;
 
-// 设置值（自动 upsert）
-db.set_setting("memory_limit_mb", "2048").await?;
+// 查询词条的所有关系
+let relations = db.list_relations_for_entry(&entry_id).await?;
 
-// 删除设置
-db.delete_setting("memory_limit_mb").await?;
+// 查询项目的所有关系（构建关系图）
+let all_relations = db.list_relations_for_project(&proj_id).await?;
+
+// 更新关系
+db.update_relation(&relation_id, UpdateEntryRelation {
+    relation: Some(RelationDirection::OneWay),
+    content: Some("单向喜欢".to_string()),
+}).await?;
+
+// 删除关系
+db.delete_relation(&relation_id).await?;
+
+// 删除两个词条间的所有关系
+db.delete_relations_between(&entry_a_id, &entry_b_id).await?;
 ```
 
 ---
@@ -400,28 +436,30 @@ db.delete_setting("memory_limit_mb").await?;
 **依赖配置（Cargo.toml）：**
 ```toml
 [dependencies]
-worldflow_core = { path = "../worldflow_core" }
+worldflow_core = { path = "../worldflow_core" }            # 默认 SQLite
+# worldflow_core = { path = "../worldflow_core", features = ["postgres"] }  # 启用 PostgreSQL
 tokio = { version = "1", features = ["full"] }
-sqlx = { version = "0.7", features = ["sqlite", "macros"] }
 ```
 
 ### 3.2 创建数据库连接
 ```rust
-use worldflow_core::SqliteDb;
+// SQLite
+use worldflow_core::{SqliteDb, ProjectOps, EntryOps}; // 按需导入 trait
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // SQLite 数据库自动创建，运行 migrations
-    let db = SqliteDb::new("sqlite://data.db").await?;
-    
-    // 此时已自动：
-    // 1. 创建所有表
-    // 2. 启用外键约束
-    // 3. 启用 WAL 日志
-    // 4. 配置内存参数
-    
-    Ok(())
-}
+let db = SqliteDb::new("sqlite://data.db").await?;
+// 自动：建表、启用外键、WAL 日志、自适应内存配置
+
+// PostgreSQL（需启用 feature = "postgres"）
+use worldflow_core::PgDb;
+
+let db = PgDb::new("postgres://user:pass@localhost/dbname").await?;
+```
+
+**注：** 方法通过 trait 提供，使用前需将对应 trait 引入作用域：
+```rust
+use worldflow_core::{ProjectOps, CategoryOps, EntryOps, TagSchemaOps, EntryRelationOps};
+// 或一次性导入组合 trait：
+use worldflow_core::Db;
 ```
 
 ### 3.3 完整示例：创建世界观
@@ -594,6 +632,18 @@ pub async fn delete_entry(&self, id: &str) -> Result<()>;
 pub async fn create_entries_bulk(&self, inputs: Vec<CreateEntry>) -> Result<usize>;
 ```
 
+### 4.6 FTS 维护 API（仅 SQLite）
+```rust
+// 批量写入后调用，消除 FTS 碎片，恢复搜索性能
+pub async fn optimize_fts(&self) -> Result<()>;
+```
+
+**使用时机：** 每次 `create_entries_bulk` 之后调用一次即可：
+```rust
+db.create_entries_bulk(entries).await?;
+db.optimize_fts().await?;
+```
+
 ### 4.4 TagSchema API
 ```rust
 // 创建
@@ -612,16 +662,28 @@ pub async fn update_tag_schema(&self, id: &str, input: CreateTagSchema) -> Resul
 pub async fn delete_tag_schema(&self, id: &str) -> Result<()>;
 ```
 
-### 4.5 AppSetting API
+### 4.5 EntryRelation API
 ```rust
-// 获取设置
-pub async fn get_setting(&self, key: &str) -> Result<Option<String>>;
+// 创建词条关系
+pub async fn create_relation(&self, input: CreateEntryRelation) -> Result<EntryRelation>;
 
-// 设置值（自动 upsert）
-pub async fn set_setting(&self, key: &str, value: &str) -> Result<AppSetting>;
+// 查询单个关系
+pub async fn get_relation(&self, id: &str) -> Result<EntryRelation>;
 
-// 删除设置
-pub async fn delete_setting(&self, key: &str) -> Result<()>;
+// 查询词条的所有关系（含双向）
+pub async fn list_relations_for_entry(&self, entry_id: &str) -> Result<Vec<EntryRelation>>;
+
+// 查询项目的所有关系（用于关系图）
+pub async fn list_relations_for_project(&self, project_id: &str) -> Result<Vec<EntryRelation>>;
+
+// 更新关系
+pub async fn update_relation(&self, id: &str, input: UpdateEntryRelation) -> Result<EntryRelation>;
+
+// 删除单个关系
+pub async fn delete_relation(&self, id: &str) -> Result<()>;
+
+// 删除两个词条间的所有关系
+pub async fn delete_relations_between(&self, entry_a: &str, entry_b: &str) -> Result<u64>;
 ```
 
 ---
@@ -636,8 +698,9 @@ CREATE TABLE projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    cover_path TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
 
@@ -645,14 +708,15 @@ CREATE TABLE projects (
 ```sql
 CREATE TABLE categories (
     id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL REFERENCES projects(id),
-    parent_id TEXT REFERENCES categories(id),
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    parent_id TEXT,
     name TEXT NOT NULL,
-    sort_order INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    
-    UNIQUE(project_id, parent_id, name)
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (id != parent_id),
+    UNIQUE (project_id, id),
+    FOREIGN KEY (project_id, parent_id) REFERENCES categories(project_id, id) ON DELETE CASCADE
 );
 ```
 
@@ -660,26 +724,17 @@ CREATE TABLE categories (
 ```sql
 CREATE TABLE entries (
     id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL REFERENCES projects(id),
-    category_id TEXT REFERENCES categories(id),
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
     title TEXT NOT NULL,
     summary TEXT,
-    content TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
     type TEXT,
-    tags TEXT,          -- JSON
-    images TEXT,        -- JSON
+    tags TEXT NOT NULL DEFAULT '[]',          -- JSON
+    images TEXT NOT NULL DEFAULT '[]',        -- JSON
     cover_path TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- FTS 虚拟表用于全文搜索
-CREATE VIRTUAL TABLE entries_fts USING fts5(
-    title,
-    summary,
-    content,
-    content = 'entries',
-    content_rowid = 'rowid'
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
 
@@ -687,40 +742,43 @@ CREATE VIRTUAL TABLE entries_fts USING fts5(
 ```sql
 CREATE TABLE tag_schemas (
     id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL REFERENCES projects(id),
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     description TEXT,
-    type TEXT NOT NULL,  -- "number", "string", "boolean"
-    target TEXT NOT NULL,  -- JSON array
+    type TEXT NOT NULL CHECK(type IN ('number', 'string', 'boolean')),
+    target TEXT NOT NULL DEFAULT '[]',  -- JSON array
     default_val TEXT,
     range_min REAL,
     range_max REAL,
-    sort_order INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    
-    UNIQUE(project_id, name)
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (range_min IS NULL OR range_max IS NULL OR range_min <= range_max)
 );
 ```
 
-**app_settings**
+**entry_relations**
 ```sql
-CREATE TABLE app_settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE entry_relations (
+    id         TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    a_id       TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+    b_id       TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+    relation   TEXT NOT NULL CHECK(relation IN ('one_way', 'two_way')),
+    content    TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (a_id, b_id, content)
 );
 ```
 
 ### 5.2 迁移文件位置
 ```
 migrations/
-├── 01_init.sql      -- 初始表创建
-├── 02_fts.sql       -- FTS 虚拟表
-└── ...
+└── 0001_init.sql    -- 初始表创建和触发器
 ```
 
-迁移通过 `sqlx migrate!()` 宏自动运行。
+迁移通过 `sqlx migrate!()` 宏自动运行，包含所有表创建和触发器定义。
 
 ---
 
@@ -759,11 +817,7 @@ match available_mb {
 }
 ```
 
-**自定义内存限制：**
-通过 `AppSetting` 覆盖自动检测：
-```rust
-db.set_setting("memory_limit_mb", "4096").await?;
-```
+**注：** 内存限制在初始化时通过自动检测设置，当前版本不支持运行时动态调整。
 
 ### 6.2 查询优化
 
@@ -782,9 +836,10 @@ CREATE INDEX idx_tag_schemas_project_id ON tag_schemas(project_id);
 - ✅ 预计算 `cover_path` 字段
 
 **全文搜索优化：**
-- ✅ FTS5 虚拟表
+- ✅ FTS5 虚拟表（SQLite）/ GIN 索引 + tsvector（PostgreSQL）
 - ✅ 支持布尔查询（AND, OR, NOT）
 - ✅ 示例：`db.search_entries(proj, "dragon AND fire", 20).await?`
+- ✅ 批量写入后调用 `optimize_fts()` 消除碎片（SQLite）
 
 ### 6.3 并发控制
 
@@ -885,7 +940,11 @@ db.delete_category(&cat_id).await?;
 ```
 
 ### Q3: 搜索的性能如何？
-**A:** FTS 查询速度很快（通常 <100ms），但首次启用 FTS 需构建索引。建议在初始化时预热。
+**A:** FTS 查询速度很快（通常 <100ms）。大量写入后搜索可能变慢（FTS 碎片化），调用 `optimize_fts()` 即可恢复：
+```rust
+db.create_entries_bulk(data).await?;
+db.optimize_fts().await?;  // 批量写入后调用
+```
 
 ### Q4: 支持什么类型的图像？
 **A:** 系统仅存储路径，不验证格式。支持：
@@ -904,37 +963,51 @@ cp data.db data.db.backup
 
 ## 九、扩展与贡献
 
-### 9.1 PostgreSQL 支持（规划中）
+### 9.1 PostgreSQL 支持
 
-**预留结构：**
-```
-db/postgres.rs  (当前为空，待实现)
+**已实现**，通过 feature flag 启用：
+```toml
+worldflow_core = { path = "...", features = ["postgres"] }
 ```
 
-**实现步骤：**
-1. 在 `postgres.rs` 中实现 `PostgresDb` 结构
-2. 为各模块实现 PostgreSQL 版本
-3. 添加功能开关：`#[cfg(feature = "postgres")]`
-4. 更新 `Cargo.toml` 依赖
+**架构：** 所有操作通过 trait 定义，SQLite 和 PostgreSQL 分别实现：
+```rust
+// 泛型函数可同时支持两种后端
+async fn do_work(db: &impl Db) {
+    db.create_project(...).await?;
+}
+
+// 或具体类型
+let sqlite_db = SqliteDb::new("sqlite://data.db").await?;
+let pg_db     = PgDb::new("postgres://...").await?;
+```
+
+**主要差异：**
+| | SQLite | PostgreSQL |
+|---|---|---|
+| 参数占位符 | `?` | `$1, $2, ...` |
+| 全文搜索 | FTS5 虚拟表 | GIN + tsvector |
+| 时间类型 | TEXT | TIMESTAMPTZ（查询时转 TEXT） |
+| 连接数 | max 5 | max 10 |
+| 迁移目录 | `migrations/` | `migrations_pg/` |
 
 ### 9.2 新增功能建议
 
 **潜在扩展：**
 - [ ] 版本历史（词条变更记录）
 - [ ] 权限系统（分享、协作权限）
-- [ ] 关系图（词条间的链接）
-- [ ] 批量操作 API
+- [ ] 批量操作 API 扩展
 - [ ] WebAssembly 支持
 
 ### 9.3 代码贡献规范
 
-**目录结构遵循：**
+**新增模块 X 的目录结构：**
 ```
-新增模块 X
-├── models/x.rs          -- 数据模型
-├── db/x.rs              -- SQLite 实现
-├── db/postgres/x.rs     -- PostgreSQL 实现（预留）
-└── 更新 models/mod.rs 和 db/mod.rs
+models/x.rs          -- 数据模型
+db/traits.rs         -- 在对应 trait 中添加方法
+db/x.rs              -- impl XxxOps for SqliteDb
+db/pg_x.rs           -- impl XxxOps for PgDb
+更新 models/mod.rs 和 db/mod.rs
 ```
 
 **测试建议：**
@@ -996,17 +1069,39 @@ cargo doc --open
 | **Category**   | 分类树  | Category（支持循环检测）  |
 | **Entry**      | 词条内容 | Entry, EntryBrief |
 | **TagSchema**  | 标签定义 | TagSchema（支持类型约束） |
-| **AppSetting** | 全局配置 | AppSetting        |
+| **EntryRelation** | 词条关系 | EntryRelation（单向/双向） |
 
 **关键设计决策：**
+- ✅ Trait 架构：`ProjectOps` 等子 trait + `Db` 组合 trait，SQLite/PG 均实现
 - ✅ SQLite + WAL：轻量、适合嵌入式
+- ✅ PostgreSQL：feature flag 启用，适合多用户/云部署
 - ✅ JSON 存储：灵活，支持自定义数据
-- ✅ FTS5：高性能全文搜索
-- ✅ 自适应内存：自动优化性能
+- ✅ FTS5 / GIN：高性能全文搜索，`optimize_fts()` 消除碎片
+- ✅ 自适应内存：SQLite 自动优化性能
 - ✅ 树状分类：无限层级 + 循环检测
 
 ---
 
-**文档版本：** 1.0  
-**最后更新：** 2026-03-23  
+**文档版本：** 1.2
+**最后更新：** 2026-04-02
 **维护者：** Worldflow 开发团队
+
+---
+
+## 更新日志
+
+### v1.2 (2026-04-02)
+- ✨ 新增：PostgreSQL 支持（`features = ["postgres"]`，`PgDb` 结构体）
+- ✨ 新增：Trait 架构（`ProjectOps`/`CategoryOps`/`EntryOps`/`TagSchemaOps`/`EntryRelationOps`/`Db`）
+- ✨ 新增：`optimize_fts()` 方法，消除批量写入后的 FTS 碎片
+- 📚 更新：lib.rs 重导出所有 trait，使用方无需手动导入路径
+
+### v1.1 (2026-04-02)
+- ✨ 新增：EntryRelation 模块支持词条间的关系管理（单向/双向）
+- 🗑️ 移除：AppSetting 全局配置模块
+- 📦 整合：将 FTS 全文搜索与初始化合并到单一迁移文件
+
+### v1.0 (2026-03-23)
+- 初始版本发布
+- 核心模块：Project、Category、Entry、TagSchema
+- SQLite 支持和性能优化

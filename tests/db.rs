@@ -1,4 +1,4 @@
-use worldflow_core::{SqliteDb, models::*};
+use worldflow_core::{models::*, CategoryOps, EntryOps, ProjectOps, SqliteDb, TagSchemaOps};
 
 async fn setup() -> SqliteDb {
     let db_path = format!(
@@ -130,22 +130,6 @@ async fn test_entry_with_tags() {
     assert_eq!(updated.tags.0[0].value, serde_json::json!(99));
 
     db.delete_project(&project.id).await.unwrap();
-}
-
-#[tokio::test]
-async fn test_app_settings() {
-    let db = setup().await;
-
-    db.set_setting("ai_api_key", "sk-test-123").await.unwrap();
-    assert_eq!(db.get_setting("ai_api_key").await.unwrap(), Some("sk-test-123".to_string()));
-
-    db.set_setting("ai_api_key", "sk-new-456").await.unwrap();
-    assert_eq!(db.get_setting("ai_api_key").await.unwrap(), Some("sk-new-456".to_string()));
-
-    assert!(db.get_setting("不存在的key").await.unwrap().is_none());
-
-    db.delete_setting("ai_api_key").await.unwrap();
-    assert!(db.get_setting("ai_api_key").await.unwrap().is_none());
 }
 
 #[tokio::test]
