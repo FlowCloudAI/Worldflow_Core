@@ -4,7 +4,7 @@ pub mod db;
 pub mod error;
 pub mod models;
 
-pub use db::traits::{Db, ProjectOps, CategoryOps, EntryOps, TagSchemaOps, EntryRelationOps};
+pub use db::traits::{Db, ProjectOps, CategoryOps, EntryOps, TagSchemaOps, EntryRelationOps, EntryTypeOps};
 pub use error::{Result, WorldflowError};
 
 #[cfg(feature = "sqlite")]

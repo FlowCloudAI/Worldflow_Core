@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
     }).await?;
 
     // 4. 搜索词条
-    let results = db.search_entries(&project.id, "主角", 10).await?;
+    let results = db.search_entries(&project.id, "主角", EntryFilter::default(), 10).await?;
     
     Ok(())
 }
@@ -302,13 +302,13 @@ db.create_entry(CreateEntry {
 let entry = db.get_entry(&entry_id).await?;
 
 // 列表查询（分页，不含 content）
-let briefs = db.list_entries(&proj_id, Some(&cat_id), 20, 0).await?;
+let briefs = db.list_entries(&proj_id, EntryFilter { category_id: Some(&cat_id), ..Default::default() }, 20, 0).await?;
 
 // 全文搜索（FTS）
-let results = db.search_entries(&proj_id, "战神", 10).await?;
+let results = db.search_entries(&proj_id, "战神", EntryFilter::default(), 10).await?;
 
 // 统计词条数
-let count = db.count_entries(&proj_id, Some(&cat_id)).await?;
+let count = db.count_entries(&proj_id, EntryFilter { category_id: Some(&cat_id), ..Default::default() }).await?;
 
 // 批量创建
 db.create_entries_bulk(entries).await?;
@@ -383,8 +383,8 @@ pub enum RelationDirection {
 pub struct EntryRelation {
     pub id:         String,              // UUID
     pub project_id: String,              // 所属项目
-    pub a_id:       String,              // 词条A（源）
-    pub b_id:       String,              // 词条B（目标）
+    pub a_id:       String,              // 词条A（单向时为源；双向时总是 < b_id）
+    pub b_id:       String,              // 词条B（单向时为目标；双向时总是 > a_id）
     pub relation:   RelationDirection,   // 关系方向
     pub content:    String,              // 关系描述
     pub created_at: String,
@@ -396,6 +396,7 @@ pub struct EntryRelation {
 - ✅ 单向/双向关系：灵活描述不同关系类型
 - ✅ 关系内容：自由文本描述关系的具体内容
 - ✅ 跨项目检查：确保关联的词条属于同一项目
+- ✅ 双向关系规范化：two_way 关系自动规范化为 `a_id < b_id`，消除重复
 
 **常用操作：**
 ```rust
@@ -530,10 +531,10 @@ async fn main() -> Result<()> {
     println!("词条创建: {}", entry.title);
 
     // 5️⃣ 查询与搜索
-    let briefs = db.list_entries(&project.id, Some(&hero_cat.id), 10, 0).await?;
+    let briefs = db.list_entries(&project.id, EntryFilter { category_id: Some(&hero_cat.id), ..Default::default() }, 10, 0).await?;
     println!("分类词条数: {}", briefs.len());
 
-    let search_results = db.search_entries(&project.id, "艾琳", 10).await?;
+    let search_results = db.search_entries(&project.id, "艾琳", EntryFilter::default(), 10).await?;
     println!("搜索结果: {}", search_results.len());
 
     // 6️⃣ 更新词条
@@ -591,6 +592,23 @@ pub async fn would_create_cycle(&self, id: &str, new_parent_id: &str) -> Result<
 ```
 
 ### 4.3 Entry API
+
+**EntryFilter 结构体（支持灵活的多条件过滤）：**
+```rust
+pub struct EntryFilter<'a> {
+    pub category_id: Option<&'a str>,  // 按分类筛选
+    pub entry_type: Option<&'a str>,   // 按词条类型筛选（如 "character", "item" 等）
+}
+
+// 实现了 Default，方便无条件查询
+impl Default for EntryFilter<'_> {
+    fn default() -> Self {
+        EntryFilter { category_id: None, entry_type: None }
+    }
+}
+```
+
+**API 方法：**
 ```rust
 // 创建
 pub async fn create_entry(&self, input: CreateEntry) -> Result<Entry>;
@@ -598,28 +616,29 @@ pub async fn create_entry(&self, input: CreateEntry) -> Result<Entry>;
 // 获取完整词条
 pub async fn get_entry(&self, id: &str) -> Result<Entry>;
 
-// 列表（分页，返回 EntryBrief）
+// 列表（分页，返回 EntryBrief，支持按分类和类型过滤）
 pub async fn list_entries(
     &self,
     project_id: &str,
-    category_id: Option<&str>,
+    filter: EntryFilter<'_>,
     limit: usize,
     offset: usize,
 ) -> Result<Vec<EntryBrief>>;
 
-// 全文搜索
+// 全文搜索（支持按分类和类型过滤）
 pub async fn search_entries(
     &self,
     project_id: &str,
     query: &str,
+    filter: EntryFilter<'_>,
     limit: usize,
 ) -> Result<Vec<EntryBrief>>;
 
-// 统计词条数
+// 统计词条数（支持按分类和类型过滤）
 pub async fn count_entries(
     &self,
     project_id: &str,
-    category_id: Option<&str>,
+    filter: EntryFilter<'_>,
 ) -> Result<i64>;
 
 // 更新
@@ -630,6 +649,55 @@ pub async fn delete_entry(&self, id: &str) -> Result<()>;
 
 // 批量创建
 pub async fn create_entries_bulk(&self, inputs: Vec<CreateEntry>) -> Result<usize>;
+```
+
+**EntryFilter 使用示例：**
+```rust
+use worldflow_core::EntryFilter;
+
+// 示例 1：列出项目的所有词条（无过滤）
+let all = db.list_entries(&proj_id, EntryFilter::default(), 20, 0).await?;
+
+// 示例 2：列出特定分类下的所有词条
+let by_cat = db.list_entries(
+    &proj_id,
+    EntryFilter { category_id: Some(&cat_id), ..Default::default() },
+    20,
+    0
+).await?;
+
+// 示例 3：列出项目中所有 "character" 类型的词条
+let by_type = db.list_entries(
+    &proj_id,
+    EntryFilter { entry_type: Some("character"), ..Default::default() },
+    20,
+    0
+).await?;
+
+// 示例 4：列出特定分类且特定类型的词条
+let by_cat_and_type = db.list_entries(
+    &proj_id,
+    EntryFilter {
+        category_id: Some(&cat_id),
+        entry_type: Some("character"),
+    },
+    20,
+    0
+).await?;
+
+// 示例 5：搜索 "龙" 字，但只搜索 "event" 类型的词条
+let search_events = db.search_entries(
+    &proj_id,
+    "龙",
+    EntryFilter { entry_type: Some("event"), ..Default::default() },
+    10
+).await?;
+
+// 示例 6：统计某分类下的词条数
+let count = db.count_entries(
+    &proj_id,
+    EntryFilter { category_id: Some(&cat_id), ..Default::default() }
+).await?;
 ```
 
 ### 4.6 FTS 维护 API（仅 SQLite）
@@ -1082,13 +1150,19 @@ cargo doc --open
 
 ---
 
-**文档版本：** 1.2
-**最后更新：** 2026-04-02
+**文档版本：** 1.3
+**最后更新：** 2026-04-04
 **维护者：** Worldflow 开发团队
 
 ---
 
 ## 更新日志
+
+### v1.3 (2026-04-04)
+- ✨ 新增：`EntryFilter` 结构体支持灵活多条件过滤（按分类、词条类型）
+- 📝 更新：`list_entries`、`search_entries`、`count_entries` 等方法增加 `EntryFilter` 参数
+- 📚 更新：API 文档和示例，展示 `EntryFilter` 的各种使用场景
+- ✅ 改进：支持同时按分类和类型过滤词条
 
 ### v1.2 (2026-04-02)
 - ✨ 新增：PostgreSQL 支持（`features = ["postgres"]`，`PgDb` 结构体）

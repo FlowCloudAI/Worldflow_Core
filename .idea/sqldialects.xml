@@ -2,6 +2,7 @@
 <project version="4">
   <component name="SqlDialectMappings">
     <file url="file://$PROJECT_DIR$/migrations/0001_init.sql" dialect="SQLite" />
+    <file url="file://$PROJECT_DIR$/migrations_pg/0001_init.sql" dialect="PostgreSQL" />
     <file url="PROJECT" dialect="SQLite" />
   </component>
 </project>

@@ -30,6 +30,13 @@ impl EntryRelationOps for SqliteDb {
     async fn create_relation(&self, input: CreateEntryRelation) -> Result<EntryRelation> {
         let id = Uuid::new_v4().to_string();
 
+        // two_way 关系规范化：强制 a_id < b_id，消除重复
+        let (a_id, b_id) = if input.relation == RelationDirection::TwoWay && input.a_id > input.b_id {
+            (&input.b_id, &input.a_id)
+        } else {
+            (&input.a_id, &input.b_id)
+        };
+
         let row = sqlx::query(
             "INSERT INTO entry_relations (id, project_id, a_id, b_id, relation, content)
              VALUES (?, ?, ?, ?, ?, ?)
@@ -37,8 +44,8 @@ impl EntryRelationOps for SqliteDb {
         )
             .bind(&id)
             .bind(&input.project_id)
-            .bind(&input.a_id)
-            .bind(&input.b_id)
+            .bind(a_id)
+            .bind(b_id)
             .bind(input.relation.as_str())
             .bind(&input.content)
             .fetch_one(&self.pool)
@@ -101,15 +108,28 @@ impl EntryRelationOps for SqliteDb {
         id: &str,
         input: UpdateEntryRelation,
     ) -> Result<EntryRelation> {
-        self.get_relation(id).await?;
+        let existing = self.get_relation(id).await?;
 
-        let row = sqlx::query(
+        // 如果变更为 two_way，需要规范化 a_id < b_id
+        let new_relation = input.relation.as_ref().unwrap_or(&existing.relation);
+        let needs_swap = *new_relation == RelationDirection::TwoWay && existing.a_id > existing.b_id;
+
+        let sql = if needs_swap {
+            "UPDATE entry_relations
+             SET relation = COALESCE(?, relation),
+                 content  = COALESCE(?, content),
+                 a_id = b_id, b_id = a_id
+             WHERE id = ?
+             RETURNING id, project_id, a_id, b_id, relation, content, created_at, updated_at"
+        } else {
             "UPDATE entry_relations
              SET relation = COALESCE(?, relation),
                  content  = COALESCE(?, content)
              WHERE id = ?
              RETURNING id, project_id, a_id, b_id, relation, content, created_at, updated_at"
-        )
+        };
+
+        let row = sqlx::query(sql)
             .bind(input.relation.as_ref().map(|r| r.as_str()))
             .bind(input.content.as_deref())
             .bind(id)

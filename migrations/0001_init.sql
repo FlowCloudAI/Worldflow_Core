@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS entry_relations (
                                                content    TEXT NOT NULL,
                                                created_at TEXT NOT NULL DEFAULT (datetime('now')),
                                                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                                               UNIQUE (a_id, b_id, content)
+                                               UNIQUE (a_id, b_id, content),
+                                               CHECK (a_id != b_id)
 );
 
 -- entries: 防止 category_id 跨项目（INSERT）
@@ -102,6 +103,21 @@ BEGIN
     WHERE (SELECT project_id FROM entries WHERE id = NEW.a_id) != NEW.project_id;
     SELECT RAISE(ABORT, 'b_id must belong to same project')
     WHERE (SELECT project_id FROM entries WHERE id = NEW.b_id) != NEW.project_id;
+END;
+
+-- entry_relations: two_way 关系必须 a_id < b_id（应用层已规范化，此为安全网）
+CREATE TRIGGER IF NOT EXISTS relations_two_way_order_insert
+    BEFORE INSERT ON entry_relations
+    WHEN NEW.relation = 'two_way' AND NEW.a_id > NEW.b_id
+BEGIN
+    SELECT RAISE(ABORT, 'two_way relation must have a_id < b_id');
+END;
+
+CREATE TRIGGER IF NOT EXISTS relations_two_way_order_update
+    BEFORE UPDATE ON entry_relations
+    WHEN NEW.relation = 'two_way' AND NEW.a_id > NEW.b_id
+BEGIN
+    SELECT RAISE(ABORT, 'two_way relation must have a_id < b_id');
 END;
 
 -- updated_at triggers
@@ -163,3 +179,26 @@ CREATE TRIGGER IF NOT EXISTS entries_fts_delete AFTER DELETE ON entries BEGIN
     INSERT INTO entries_fts(entries_fts, rowid, project_id, title, content)
     VALUES ('delete', old.rowid, old.project_id, old.title, old.content);
 END;
+
+-- ── entry_types 表（自定义词条类型）──────────────────
+CREATE TABLE IF NOT EXISTS entry_types (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    description TEXT,
+    icon        TEXT,
+    color       TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (project_id, name),
+    CHECK (name != '')
+);
+
+-- 自动更新 updated_at
+CREATE TRIGGER IF NOT EXISTS entry_types_updated_at
+    AFTER UPDATE ON entry_types
+BEGIN UPDATE entry_types SET updated_at = datetime('now') WHERE id = NEW.id; END;
+
+-- 索引
+CREATE INDEX IF NOT EXISTS idx_entry_types_project ON entry_types(project_id);
+CREATE INDEX IF NOT EXISTS idx_entry_types_name ON entry_types(project_id, name);

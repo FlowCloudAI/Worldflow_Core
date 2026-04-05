@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(xargs wc:*)",
-      "Bash(cargo check:*)"
+      "Bash(cargo check:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo build:*)",
+      "Bash(rm -f worldflow_dev.db*)",
+      "Bash(DATABASE_URL=\"postgres://postgres:password@localhost/worldflow_dev\" cargo test --test stress_test_pg --features postgres)"
     ]
   }
 }

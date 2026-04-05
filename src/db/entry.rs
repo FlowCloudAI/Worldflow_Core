@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use crate::{
     db::SqliteDb,
     error::{Result, WorldflowError},
-    models::{CreateEntry, Entry, EntryBrief, UpdateEntry},
+    models::{CreateEntry, Entry, EntryBrief, EntryFilter, UpdateEntry},
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -42,24 +42,16 @@ fn row_to_entry_brief(row: &sqlx::sqlite::SqliteRow) -> Result<EntryBrief> {
 }
 
 impl EntryOps for SqliteDb {
-    async fn count_entries(&self, project_id: &str, category_id: Option<&str>) -> Result<i64> {
-        let row =
-            match category_id {
-                Some(cid) => sqlx::query(
-                    "SELECT COUNT(*) as cnt FROM entries WHERE project_id = ? AND category_id = ?",
-                )
-                .bind(project_id)
-                .bind(cid)
-                .fetch_one(&self.pool)
-                .await?,
+    async fn count_entries(&self, project_id: &str, filter: EntryFilter<'_>) -> Result<i64> {
+        let mut sql = "SELECT COUNT(*) as cnt FROM entries WHERE project_id = ?".to_string();
+        if filter.category_id.is_some() { sql.push_str(" AND category_id = ?"); }
+        if filter.entry_type.is_some()  { sql.push_str(" AND type = ?"); }
 
-                None => {
-                    sqlx::query("SELECT COUNT(*) as cnt FROM entries WHERE project_id = ?")
-                        .bind(project_id)
-                        .fetch_one(&self.pool)
-                        .await?
-                }
-            };
+        let mut q = sqlx::query(&sql).bind(project_id);
+        if let Some(cid) = filter.category_id { q = q.bind(cid); }
+        if let Some(t)   = filter.entry_type  { q = q.bind(t); }
+
+        let row = q.fetch_one(&self.pool).await?;
         Ok(row.try_get("cnt")?)
     }
 
@@ -108,45 +100,20 @@ impl EntryOps for SqliteDb {
     async fn list_entries(
         &self,
         project_id: &str,
-        category_id: Option<&str>,
+        filter: EntryFilter<'_>,
         limit: usize,
         offset: usize,
     ) -> Result<Vec<EntryBrief>> {
-        let limit = limit as i64;
-        let offset = offset as i64;
+        let mut sql = "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
+                       FROM entries WHERE project_id = ?".to_string();
+        if filter.category_id.is_some() { sql.push_str(" AND category_id = ?"); }
+        if filter.entry_type.is_some()  { sql.push_str(" AND type = ?"); }
+        sql.push_str(" ORDER BY updated_at DESC LIMIT ? OFFSET ?");
 
-        let rows = match category_id {
-            Some(cid) => {
-                sqlx::query(
-                    "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
-                    FROM entries
-                    WHERE project_id = ? AND category_id = ?
-                    ORDER BY updated_at DESC
-                    LIMIT ? OFFSET ?",
-                )
-                .bind(project_id)
-                .bind(cid)
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(&self.pool)
-                .await?
-            }
-
-            None => {
-                sqlx::query(
-                    "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
-                    FROM entries
-                    WHERE project_id = ?
-                    ORDER BY updated_at DESC
-                    LIMIT ? OFFSET ?",
-                )
-                .bind(project_id)
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(&self.pool)
-                .await?
-            }
-        };
+        let mut q = sqlx::query(&sql).bind(project_id);
+        if let Some(cid) = filter.category_id { q = q.bind(cid); }
+        if let Some(t)   = filter.entry_type  { q = q.bind(t); }
+        let rows = q.bind(limit as i64).bind(offset as i64).fetch_all(&self.pool).await?;
 
         rows.iter().map(row_to_entry_brief).collect()
     }
@@ -155,23 +122,21 @@ impl EntryOps for SqliteDb {
         &self,
         project_id: &str,
         query: &str,
+        filter: EntryFilter<'_>,
         limit: usize,
     ) -> Result<Vec<EntryBrief>> {
-        let limit = limit as i64;
+        let mut sql = "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
+                       FROM entries
+                       WHERE project_id = ?
+                         AND rowid IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)".to_string();
+        if filter.category_id.is_some() { sql.push_str(" AND category_id = ?"); }
+        if filter.entry_type.is_some()  { sql.push_str(" AND type = ?"); }
+        sql.push_str(" ORDER BY updated_at DESC LIMIT ?");
 
-        let rows = sqlx::query(
-            "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
-                    FROM entries
-                    WHERE project_id = ?
-                    AND rowid IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)
-                    ORDER BY updated_at DESC
-                    LIMIT ?",
-        )
-        .bind(project_id)
-        .bind(query)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?;
+        let mut q = sqlx::query(&sql).bind(project_id).bind(query);
+        if let Some(cid) = filter.category_id { q = q.bind(cid); }
+        if let Some(t)   = filter.entry_type  { q = q.bind(t); }
+        let rows = q.bind(limit as i64).fetch_all(&self.pool).await?;
 
         rows.iter().map(row_to_entry_brief).collect()
     }

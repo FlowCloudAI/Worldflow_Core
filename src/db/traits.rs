@@ -19,11 +19,11 @@ pub trait CategoryOps: Send + Sync {
 }
 
 pub trait EntryOps: Send + Sync {
-    async fn count_entries(&self, project_id: &str, category_id: Option<&str>) -> Result<i64>;
+    async fn count_entries(&self, project_id: &str, filter: EntryFilter<'_>) -> Result<i64>;
     async fn create_entry(&self, input: CreateEntry) -> Result<Entry>;
     async fn get_entry(&self, id: &str) -> Result<Entry>;
-    async fn list_entries(&self, project_id: &str, category_id: Option<&str>, limit: usize, offset: usize) -> Result<Vec<EntryBrief>>;
-    async fn search_entries(&self, project_id: &str, query: &str, limit: usize) -> Result<Vec<EntryBrief>>;
+    async fn list_entries(&self, project_id: &str, filter: EntryFilter<'_>, limit: usize, offset: usize) -> Result<Vec<EntryBrief>>;
+    async fn search_entries(&self, project_id: &str, query: &str, filter: EntryFilter<'_>, limit: usize) -> Result<Vec<EntryBrief>>;
     async fn update_entry(&self, id: &str, input: UpdateEntry) -> Result<Entry>;
     async fn delete_entry(&self, id: &str) -> Result<()>;
     async fn create_entries_bulk(&self, inputs: Vec<CreateEntry>) -> Result<usize>;
@@ -47,6 +47,29 @@ pub trait EntryRelationOps: Send + Sync {
     async fn delete_relations_between(&self, entry_a: &str, entry_b: &str) -> Result<u64>;
 }
 
+pub trait EntryTypeOps: Send + Sync {
+    /// 创建自定义词条类型
+    async fn create_entry_type(&self, input: CreateCustomEntryType) -> Result<CustomEntryType>;
+
+    /// 获取自定义词条类型
+    async fn get_entry_type(&self, id: &str) -> Result<CustomEntryType>;
+
+    /// 列出项目内所有词条类型（内置+自定义，内置在前）
+    async fn list_all_entry_types(&self, project_id: &str) -> Result<Vec<EntryTypeView>>;
+
+    /// 列出项目内自定义词条类型
+    async fn list_custom_entry_types(&self, project_id: &str) -> Result<Vec<CustomEntryType>>;
+
+    /// 更新自定义词条类型
+    async fn update_entry_type(&self, id: &str, input: UpdateCustomEntryType) -> Result<CustomEntryType>;
+
+    /// 删除自定义词条类型（前提：entries 中不存在该 type 的引用）
+    async fn delete_entry_type(&self, id: &str) -> Result<()>;
+
+    /// 检查是否有 entries 在使用该 type
+    async fn check_entry_type_in_use(&self, project_id: &str, type_id: &str) -> Result<bool>;
+}
+
 /// 组合 trait，实现所有子 trait 即自动实现 Db
-pub trait Db: ProjectOps + CategoryOps + EntryOps + TagSchemaOps + EntryRelationOps {}
-impl<T: ProjectOps + CategoryOps + EntryOps + TagSchemaOps + EntryRelationOps> Db for T {}
+pub trait Db: ProjectOps + CategoryOps + EntryOps + TagSchemaOps + EntryRelationOps + EntryTypeOps {}
+impl<T: ProjectOps + CategoryOps + EntryOps + TagSchemaOps + EntryRelationOps + EntryTypeOps> Db for T {}

@@ -1,0 +1,192 @@
+<svg viewBox="0 0 1400 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .table { fill: #f8f9fa; stroke: #333; stroke-width: 1.5; }
+      .table-name { fill: #2c3e50; font-weight: bold; font-size: 14px; }
+      .pk { fill: #e74c3c; font-weight: bold; }
+      .fk { fill: #3498db; }
+      .field-text { font-family: monospace; font-size: 12px; }
+      .label { font-size: 11px; fill: #555; }
+      .relation-line { stroke: #7f8c8d; stroke-width: 1.5; fill: none; }
+      .cascade { stroke: #e74c3c; stroke-dasharray: 3,3; }
+      .optional { stroke: #f39c12; stroke-dasharray: 5,3; }
+      .relation-label { font-size: 10px; fill: #555; background: white; }
+    </style>
+  </defs>
+
+  <!-- 标题 -->
+  <text x="700" y="25" text-anchor="middle" style="font-size: 20px; font-weight: bold; fill: #2c3e50;">
+    Worldflow Core 数据库结构
+  </text>
+
+  <!-- Projects 表 -->
+  <g>
+    <rect x="50" y="70" width="200" height="140" class="table" rx="4"/>
+    <rect x="50" y="70" width="200" height="30" fill="#34495e"/>
+    <text x="150" y="91" text-anchor="middle" class="table-name" fill="white">projects</text>
+
+    <text x="60" y="110" class="field-text"><tspan class="pk">PK</tspan> id</text>
+    <text x="60" y="125" class="field-text">name</text>
+    <text x="60" y="140" class="field-text">description</text>
+    <text x="60" y="155" class="field-text">cover_path</text>
+    <text x="60" y="170" class="field-text">created_at, updated_at</text>
+    <text x="60" y="185" class="field-text">⏱ BEFORE UPDATE</text>
+  </g>
+
+  <!-- Categories 表 -->
+  <g>
+    <rect x="350" y="70" width="220" height="160" class="table" rx="4"/>
+    <rect x="350" y="70" width="220" height="30" fill="#34495e"/>
+    <text x="460" y="91" text-anchor="middle" class="table-name" fill="white">categories</text>
+
+    <text x="360" y="110" class="field-text"><tspan class="pk">PK</tspan> id</text>
+    <text x="360" y="125" class="field-text"><tspan class="fk">FK</tspan> project_id</text>
+    <text x="360" y="140" class="field-text"><tspan class="fk">FK</tspan> parent_id (树)</text>
+    <text x="360" y="155" class="field-text">name, sort_order</text>
+    <text x="360" y="170" class="field-text">created_at, updated_at</text>
+    <text x="360" y="185" class="field-text">⏱ BEFORE UPDATE</text>
+    <text x="360" y="200" class="field-text">UNIQUE (project_id, id)</text>
+    <text x="360" y="215" class="label" style="font-size: 10px;">#️⃣ id ≠ parent_id</text>
+  </g>
+
+  <!-- Tag Schemas 表 -->
+  <g>
+    <rect x="650" y="70" width="220" height="160" class="table" rx="4"/>
+    <rect x="650" y="70" width="220" height="30" fill="#34495e"/>
+    <text x="760" y="91" text-anchor="middle" class="table-name" fill="white">tag_schemas</text>
+
+    <text x="660" y="110" class="field-text"><tspan class="pk">PK</tspan> id</text>
+    <text x="660" y="125" class="field-text"><tspan class="fk">FK</tspan> project_id</text>
+    <text x="660" y="140" class="field-text">name, description</text>
+    <text x="660" y="155" class="field-text">type (number/string/boolean)</text>
+    <text x="660" y="170" class="field-text">target, default_val</text>
+    <text x="660" y="185" class="field-text">range_min, range_max</text>
+    <text x="660" y="200" class="field-text">created_at, updated_at</text>
+    <text x="660" y="215" class="label" style="font-size: 10px;">⏱ BEFORE UPDATE</text>
+  </g>
+
+  <!-- Entry Types 表 -->
+  <g>
+    <rect x="950" y="70" width="200" height="140" class="table" rx="4"/>
+    <rect x="950" y="70" width="200" height="30" fill="#34495e"/>
+    <text x="1050" y="91" text-anchor="middle" class="table-name" fill="white">entry_types</text>
+
+    <text x="960" y="110" class="field-text"><tspan class="pk">PK</tspan> id (UUID)</text>
+    <text x="960" y="125" class="field-text"><tspan class="fk">FK</tspan> project_id</text>
+    <text x="960" y="140" class="field-text">name, description</text>
+    <text x="960" y="155" class="field-text">icon, color</text>
+    <text x="960" y="170" class="field-text">created_at, updated_at</text>
+    <text x="960" y="185" class="field-text">⏱ BEFORE UPDATE</text>
+  </g>
+
+  <!-- Entries 表 -->
+  <g>
+    <rect x="50" y="290" width="260" height="190" class="table" rx="4"/>
+    <rect x="50" y="290" width="260" height="30" fill="#34495e"/>
+    <text x="180" y="311" text-anchor="middle" class="table-name" fill="white">entries</text>
+
+    <text x="60" y="330" class="field-text"><tspan class="pk">PK</tspan> id</text>
+    <text x="60" y="345" class="field-text"><tspan class="fk">FK</tspan> project_id</text>
+    <text x="60" y="360" class="field-text"><tspan class="fk">FK</tspan> category_id (可选)</text>
+    <text x="60" y="375" class="field-text">title ✓, summary</text>
+    <text x="60" y="390" class="field-text">content, type, tags</text>
+    <text x="60" y="405" class="field-text">images, cover_path</text>
+    <text x="60" y="420" class="field-text">created_at, updated_at</text>
+    <text x="60" y="435" class="field-text">created_at, updated_at</text>
+    <text x="60" y="450" class="field-text">⏱ BEFORE UPDATE</text>
+    <text x="60" y="465" class="label" style="font-size: 10px;">🔍 FTS (全文搜索)</text>
+  </g>
+
+  <!-- Entry Relations 表 -->
+  <g>
+    <rect x="400" y="320" width="280" height="170" class="table" rx="4"/>
+    <rect x="400" y="320" width="280" height="30" fill="#34495e"/>
+    <text x="540" y="341" text-anchor="middle" class="table-name" fill="white">entry_relations</text>
+
+    <text x="410" y="360" class="field-text"><tspan class="pk">PK</tspan> id</text>
+    <text x="410" y="375" class="field-text"><tspan class="fk">FK</tspan> project_id</text>
+    <text x="410" y="390" class="field-text"><tspan class="fk">FK</tspan> a_id (源/最小)</text>
+    <text x="410" y="405" class="field-text"><tspan class="fk">FK</tspan> b_id (目标/最大)</text>
+    <text x="410" y="420" class="field-text">relation (one_way/two_way)</text>
+    <text x="410" y="435" class="field-text">content</text>
+    <text x="410" y="450" class="field-text">created_at, updated_at</text>
+    <text x="410" y="465" class="field-text">⏱ BEFORE UPDATE</text>
+    <text x="410" y="480" class="label" style="font-size: 10px;">🔤 two_way: a_id &lt; b_id (规范化)</text>
+  </g>
+
+  <!-- 关系线 -->
+  <!-- Projects -> Categories (1:N) -->
+  <line x1="150" y1="210" x2="420" y2="230" class="relation-line cascade" marker-end="url(#arrowhead)"/>
+  <text x="280" y="220" class="label">1:N CASCADE</text>
+
+  <!-- Projects -> Tag Schemas (1:N) -->
+  <line x1="250" y1="140" x2="650" y2="140" class="relation-line cascade"/>
+  <text x="450" y="135" class="label">1:N CASCADE</text>
+
+  <!-- Projects -> Entries (1:N) -->
+  <line x1="150" y1="210" x2="150" y2="290" class="relation-line cascade"/>
+  <text x="165" y="250" class="label">1:N CASCADE</text>
+
+  <!-- Projects -> Entry Relations (1:N) -->
+  <line x1="250" y1="140" x2="400" y2="360" class="relation-line cascade"/>
+  <text x="320" y="240" class="label">1:N CASCADE</text>
+
+  <!-- Projects -> Entry Types (1:N) -->
+  <line x1="250" y1="140" x2="950" y2="140" class="relation-line cascade"/>
+  <text x="600" y="135" class="label">1:N CASCADE</text>
+
+  <!-- Categories -> Categories (Self) -->
+  <path d="M 350 100 Q 300 50 350 100" class="relation-line cascade"/>
+  <text x="290" y="60" class="label">parent_id</text>
+
+  <!-- Categories -> Entries (1:N, 可选) -->
+  <line x1="350" y1="350" x2="310" y2="350" class="relation-line optional"/>
+  <text x="320" y="345" class="label">1:N (可选)</text>
+
+  <!-- Entry Relations -> Entries (a_id & b_id) -->
+  <line x1="310" y1="380" x2="400" y2="380" class="relation-line cascade"/>
+  <text x="350" y="375" class="label" style="font-size: 9px;">a_id/b_id</text>
+
+  <!-- Entry Types <- Entries (type字段) -->
+  <line x1="310" y1="350" x2="950" y2="140" class="relation-line" stroke-dasharray="4,4"/>
+  <text x="600" y="240" class="label">type (字符串匹配)</text>
+
+  <!-- 图例 -->
+  <g transform="translate(700, 600)">
+    <text x="0" y="0" style="font-weight: bold; font-size: 12px; fill: #2c3e50;">图例</text>
+
+    <line x1="0" y1="20" x2="40" y2="20" class="relation-line cascade"/>
+    <text x="50" y="25" class="label">CASCADE 删除关系</text>
+
+    <line x1="0" y1="40" x2="40" y2="40" class="relation-line optional"/>
+    <text x="50" y="45" class="label">可选 (ON DELETE SET NULL)</text>
+
+    <line x1="0" y1="60" x2="40" y2="60" class="relation-line" stroke-dasharray="4,4"/>
+    <text x="50" y="65" class="label">逻辑关系 (非FK)</text>
+
+    <text x="0" y="85" class="label"><tspan class="pk">PK</tspan> = 主键</text>
+    <text x="0" y="100" class="label"><tspan class="fk">FK</tspan> = 外键</text>
+    <text x="0" y="115" class="label">⏱ = BEFORE UPDATE 触发器自动更新时间戳</text>
+    <text x="0" y="130" class="label">#️⃣ = 约束检查</text>
+    <text x="0" y="145" class="label">✓ = NOT NULL</text>
+    <text x="0" y="160" class="label">🔍 = 全文搜索索引</text>
+  </g>
+
+  <!-- 约束说明 -->
+  <g transform="translate(700, 800)">
+    <text x="0" y="0" style="font-weight: bold; font-size: 12px; fill: #2c3e50;">核心约束</text>
+
+    <text x="0" y="20" class="label">✓ entries.category_id 必须与 entries.project_id 同属一个项目 (触发器)</text>
+    <text x="0" y="35" class="label">✓ entry_relations(a_id, b_id) 必须与 entry_relations.project_id 同属一个项目 (触发器)</text>
+    <text x="0" y="50" class="label">✓ entry_relations two_way 关系规范化: a_id &lt; b_id (应用层 + DB触发器)</text>
+    <text x="0" y="65" class="label">✓ entry_relations a_id ≠ b_id</text>
+    <text x="0" y="80" class="label">✓ categories 树形自引用：id ≠ parent_id</text>
+  </g>
+
+  <!-- 防箭头 SVG 定义 -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+      <polygon points="0 0, 10 5, 0 10" fill="#7f8c8d"/>
+    </marker>
+  </defs>
+</svg>

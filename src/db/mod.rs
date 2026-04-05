@@ -14,6 +14,8 @@ mod entry;
 #[cfg(feature = "sqlite")]
 mod entry_relation;
 #[cfg(feature = "sqlite")]
+mod entry_type;
+#[cfg(feature = "sqlite")]
 mod project;
 #[cfg(feature = "sqlite")]
 mod tag_schema;
@@ -89,6 +91,8 @@ mod pg_category;
 mod pg_entry;
 #[cfg(feature = "postgres")]
 mod pg_entry_relation;
+#[cfg(feature = "postgres")]
+mod pg_entry_type;
 #[cfg(feature = "postgres")]
 mod pg_project;
 #[cfg(feature = "postgres")]

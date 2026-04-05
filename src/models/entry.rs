@@ -58,6 +58,12 @@ pub struct CreateEntry {
 }
 
 
+#[derive(Debug, Clone, Default)]
+pub struct EntryFilter<'a> {
+    pub category_id: Option<&'a str>,
+    pub entry_type:  Option<&'a str>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateEntry {
     pub category_id: Option<Option<String>>,
