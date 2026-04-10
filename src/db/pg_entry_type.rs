@@ -27,7 +27,7 @@ fn row_to_custom_entry_type(row: &sqlx::postgres::PgRow) -> Result<CustomEntryTy
 
 impl EntryTypeOps for PgDb {
     async fn create_entry_type(&self, input: CreateCustomEntryType) -> Result<CustomEntryType> {
-        let id = Uuid::new_v4().to_string();
+        let id = Uuid::now_v7();
 
         let row = sqlx::query(
             "INSERT INTO entry_types (id, project_id, name, description, icon, color)
@@ -46,7 +46,33 @@ impl EntryTypeOps for PgDb {
         row_to_custom_entry_type(&row)
     }
 
-    async fn get_entry_type(&self, id: &str) -> Result<CustomEntryType> {
+    async fn create_entry_types_bulk(&self, inputs: Vec<CreateCustomEntryType>) -> Result<Vec<CustomEntryType>> {
+        let mut tx = self.pool.begin().await?;
+        let mut entry_types = Vec::with_capacity(inputs.len());
+
+        for input in inputs {
+            let id = Uuid::now_v7();
+            let row = sqlx::query(
+                "INSERT INTO entry_types (id, project_id, name, description, icon, color)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 RETURNING id, project_id, name, description, icon, color, created_at::TEXT, updated_at::TEXT",
+            )
+                .bind(id)
+                .bind(input.project_id)
+                .bind(input.name)
+                .bind(input.description)
+                .bind(input.icon)
+                .bind(input.color)
+                .fetch_one(&mut *tx)
+                .await?;
+            entry_types.push(row_to_custom_entry_type(&row)?);
+        }
+
+        tx.commit().await?;
+        Ok(entry_types)
+    }
+
+    async fn get_entry_type(&self, id: &Uuid) -> Result<CustomEntryType> {
         let row = sqlx::query(
             "SELECT id, project_id, name, description, icon, color, created_at::TEXT, updated_at::TEXT
              FROM entry_types
@@ -60,7 +86,7 @@ impl EntryTypeOps for PgDb {
         row_to_custom_entry_type(&row)
     }
 
-    async fn list_all_entry_types(&self, project_id: &str) -> Result<Vec<EntryTypeView>> {
+    async fn list_all_entry_types(&self, project_id: &Uuid) -> Result<Vec<EntryTypeView>> {
         use crate::models::BUILTIN_ENTRY_TYPES;
 
         // 先添加所有内置类型
@@ -89,7 +115,7 @@ impl EntryTypeOps for PgDb {
         Ok(types)
     }
 
-    async fn list_custom_entry_types(&self, project_id: &str) -> Result<Vec<CustomEntryType>> {
+    async fn list_custom_entry_types(&self, project_id: &Uuid) -> Result<Vec<CustomEntryType>> {
         let rows = sqlx::query(
             "SELECT id, project_id, name, description, icon, color, created_at::TEXT, updated_at::TEXT
              FROM entry_types
@@ -103,7 +129,7 @@ impl EntryTypeOps for PgDb {
         rows.iter().map(row_to_custom_entry_type).collect()
     }
 
-    async fn update_entry_type(&self, id: &str, input: UpdateCustomEntryType) -> Result<CustomEntryType> {
+    async fn update_entry_type(&self, id: &Uuid, input: UpdateCustomEntryType) -> Result<CustomEntryType> {
         // 先验证该类型是否存在
         self.get_entry_type(id).await?;
 
@@ -151,7 +177,7 @@ impl EntryTypeOps for PgDb {
         row_to_custom_entry_type(&row)
     }
 
-    async fn delete_entry_type(&self, id: &str) -> Result<()> {
+    async fn delete_entry_type(&self, id: &Uuid) -> Result<()> {
         // 先验证该类型是否存在
         let custom_type = self.get_entry_type(id).await?;
 
@@ -174,9 +200,9 @@ impl EntryTypeOps for PgDb {
         Ok(())
     }
 
-    async fn check_entry_type_in_use(&self, _project_id: &str, type_id: &str) -> Result<bool> {
+    async fn check_entry_type_in_use(&self, _project_id: &Uuid, type_id: &Uuid) -> Result<bool> {
         let row = sqlx::query("SELECT COUNT(*) as cnt FROM entries WHERE type = $1 LIMIT 1")
-            .bind(type_id)
+            .bind(type_id.to_string())
             .fetch_one(&self.pool)
             .await?;
 

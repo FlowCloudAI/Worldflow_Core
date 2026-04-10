@@ -20,7 +20,7 @@ fn row_to_category(row: &sqlx::postgres::PgRow) -> Result<Category> {
 }
 
 impl CategoryOps for PgDb {
-    async fn would_create_cycle(&self, id: &str, new_parent_id: &str) -> Result<bool> {
+    async fn would_create_cycle(&self, id: &Uuid, new_parent_id: &Uuid) -> Result<bool> {
         let row = sqlx::query(
             "WITH RECURSIVE descendants(id) AS (
              SELECT id FROM categories WHERE id = $1
@@ -39,7 +39,7 @@ impl CategoryOps for PgDb {
     }
 
     async fn create_category(&self, input: CreateCategory) -> Result<Category> {
-        let id = Uuid::new_v4().to_string();
+        let id = Uuid::now_v7();
         let sort_order = input.sort_order.unwrap_or(0);
         let row = sqlx::query(
             "INSERT INTO categories (id, project_id, parent_id, name, sort_order)
@@ -56,7 +56,33 @@ impl CategoryOps for PgDb {
         row_to_category(&row)
     }
 
-    async fn get_category(&self, id: &str) -> Result<Category> {
+    async fn create_categories_bulk(&self, inputs: Vec<CreateCategory>) -> Result<Vec<Category>> {
+        let mut tx = self.pool.begin().await?;
+        let mut categories = Vec::with_capacity(inputs.len());
+
+        for input in inputs {
+            let id = Uuid::now_v7();
+            let sort_order = input.sort_order.unwrap_or(0);
+            let row = sqlx::query(
+                "INSERT INTO categories (id, project_id, parent_id, name, sort_order)
+                 VALUES ($1, $2, $3, $4, $5)
+                 RETURNING id, project_id, parent_id, name, sort_order, created_at::TEXT, updated_at::TEXT"
+            )
+                .bind(id)
+                .bind(input.project_id)
+                .bind(input.parent_id)
+                .bind(input.name)
+                .bind(sort_order)
+                .fetch_one(&mut *tx)
+                .await?;
+            categories.push(row_to_category(&row)?);
+        }
+
+        tx.commit().await?;
+        Ok(categories)
+    }
+
+    async fn get_category(&self, id: &Uuid) -> Result<Category> {
         let row = sqlx::query(
             "SELECT id, project_id, parent_id, name, sort_order, created_at::TEXT, updated_at::TEXT
              FROM categories WHERE id = $1"
@@ -68,7 +94,7 @@ impl CategoryOps for PgDb {
         row_to_category(&row)
     }
 
-    async fn list_categories(&self, project_id: &str) -> Result<Vec<Category>> {
+    async fn list_categories(&self, project_id: &Uuid) -> Result<Vec<Category>> {
         let rows = sqlx::query(
             "SELECT id, project_id, parent_id, name, sort_order, created_at::TEXT, updated_at::TEXT
              FROM categories
@@ -81,7 +107,7 @@ impl CategoryOps for PgDb {
         rows.iter().map(row_to_category).collect()
     }
 
-    async fn update_category(&self, id: &str, input: UpdateCategory) -> Result<Category> {
+    async fn update_category(&self, id: &Uuid, input: UpdateCategory) -> Result<Category> {
         if let Some(Some(ref new_parent)) = input.parent_id {
             if self.would_create_cycle(id, new_parent).await? {
                 return Err(WorldflowError::InvalidInput(
@@ -121,7 +147,7 @@ impl CategoryOps for PgDb {
         row_to_category(&row)
     }
 
-    async fn delete_category(&self, id: &str) -> Result<()> {
+    async fn delete_category(&self, id: &Uuid) -> Result<()> {
         let result = sqlx::query("DELETE FROM categories WHERE id = $1")
             .bind(id)
             .execute(&self.pool)

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use crate::error::{Result, WorldflowError};
 
 /// 内置词条类型定义
@@ -81,8 +82,8 @@ pub const BUILTIN_ENTRY_TYPES: &[BuiltinEntryType] = &[
 /// 自定义词条类型
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct CustomEntryType {
-    pub id: String,                     // UUID
-    pub project_id: String,
+    pub id: Uuid,                       // UUID
+    pub project_id: Uuid,
     pub name: String,
     pub description: Option<String>,
     pub icon: Option<String>,
@@ -94,7 +95,7 @@ pub struct CustomEntryType {
 /// 创建自定义词条类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateCustomEntryType {
-    pub project_id: String,
+    pub project_id: Uuid,
     pub name: String,
     pub description: Option<String>,
     pub icon: Option<String>,
@@ -126,10 +127,10 @@ pub enum EntryTypeView {
 
 impl EntryTypeView {
     /// 返回类型的 key（内置）或 id（自定义）
-    pub fn key_or_id(&self) -> &str {
+    pub fn key_or_id(&self) -> String {
         match self {
-            EntryTypeView::Builtin { key, .. } => key,
-            EntryTypeView::Custom(ct) => &ct.id,
+            EntryTypeView::Builtin { key, .. } => (*key).to_string(),
+            EntryTypeView::Custom(ct) => ct.id.to_string(),
         }
     }
 
@@ -178,9 +179,9 @@ impl From<CustomEntryType> for EntryTypeView {
     }
 }
 
-/// 判断字符串是否为内置类型 key（通过长度判断：UUID 为 36 字符，内置 key 小于 36）
+/// 判断字符串是否为内置类型 key（无法解析为 UUID 的视为内置 key）
 pub fn is_builtin_type(s: &str) -> bool {
-    s.len() < 36
+    Uuid::try_parse(s).is_err()
 }
 
 /// 获取内置类型定义
@@ -219,7 +220,7 @@ mod tests {
     fn test_is_builtin_type_detection() {
         assert!(is_builtin_type("character"));
         assert!(is_builtin_type("organization"));
-        assert!(!is_builtin_type("550e8400-e29b-41d4-a716-446655440000")); // UUID
+        assert!(!is_builtin_type("018f0d4e-6b30-7c2a-9f65-8d7b3a1c2e4f")); // UUID
     }
 
     #[test]
@@ -248,9 +249,10 @@ mod tests {
 
     #[test]
     fn test_entry_type_view_from_custom() {
+        let custom_id = Uuid::parse_str("018f0d4e-6b30-7c2a-9f65-8d7b3a1c2e4f").unwrap();
         let custom = CustomEntryType {
-            id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
-            project_id: "proj1".to_string(),
+            id: custom_id,
+            project_id: Uuid::now_v7(),
             name: "自定义类型".to_string(),
             description: Some("描述".to_string()),
             icon: Some("🎨".to_string()),
@@ -259,7 +261,7 @@ mod tests {
             updated_at: "2026-04-04T00:00:00".to_string(),
         };
         let view: EntryTypeView = custom.into();
-        assert_eq!(view.key_or_id(), "550e8400-e29b-41d4-a716-446655440000");
+        assert_eq!(view.key_or_id(), "018f0d4e-6b30-7c2a-9f65-8d7b3a1c2e4f");
         assert_eq!(view.name(), "自定义类型");
     }
 }

@@ -42,7 +42,7 @@ fn row_to_entry_brief(row: &sqlx::postgres::PgRow) -> Result<EntryBrief> {
 }
 
 impl EntryOps for PgDb {
-    async fn count_entries(&self, project_id: &str, filter: EntryFilter<'_>) -> Result<i64> {
+    async fn count_entries(&self, project_id: &Uuid, filter: EntryFilter<'_>) -> Result<i64> {
         let mut p = 2usize;
         let mut sql = "SELECT COUNT(*) as cnt FROM entries WHERE project_id = $1".to_string();
         if filter.category_id.is_some() { sql.push_str(&format!(" AND category_id = ${p}")); p += 1; }
@@ -57,7 +57,7 @@ impl EntryOps for PgDb {
     }
 
     async fn create_entry(&self, input: CreateEntry) -> Result<Entry> {
-        let id     = Uuid::new_v4().to_string();
+        let id     = Uuid::now_v7();
         let tags   = serde_json::to_string(&input.tags.unwrap_or_default())?;
         let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;
         let cover_path = input.images.as_ref()
@@ -85,7 +85,7 @@ impl EntryOps for PgDb {
         row_to_entry(&row)
     }
 
-    async fn get_entry(&self, id: &str) -> Result<Entry> {
+    async fn get_entry(&self, id: &Uuid) -> Result<Entry> {
         let row = sqlx::query(
             "SELECT id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at::TEXT, updated_at::TEXT
              FROM entries WHERE id = $1"
@@ -100,7 +100,7 @@ impl EntryOps for PgDb {
 
     async fn list_entries(
         &self,
-        project_id: &str,
+        project_id: &Uuid,
         filter: EntryFilter<'_>,
         limit: usize,
         offset: usize,
@@ -122,7 +122,7 @@ impl EntryOps for PgDb {
 
     async fn search_entries(
         &self,
-        project_id: &str,
+        project_id: &Uuid,
         query: &str,
         filter: EntryFilter<'_>,
         limit: usize,
@@ -145,7 +145,7 @@ impl EntryOps for PgDb {
         rows.iter().map(row_to_entry_brief).collect()
     }
 
-    async fn update_entry(&self, id: &str, input: UpdateEntry) -> Result<Entry> {
+    async fn update_entry(&self, id: &Uuid, input: UpdateEntry) -> Result<Entry> {
         self.get_entry(id).await?;
 
         let tags_json = input.tags.map(|t| serde_json::to_string(&t)).transpose()?;
@@ -192,7 +192,7 @@ impl EntryOps for PgDb {
         row_to_entry(&row)
     }
 
-    async fn delete_entry(&self, id: &str) -> Result<()> {
+    async fn delete_entry(&self, id: &Uuid) -> Result<()> {
         let result = sqlx::query("DELETE FROM entries WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
@@ -208,7 +208,7 @@ impl EntryOps for PgDb {
         let mut count = 0;
 
         for input in inputs {
-            let id     = Uuid::new_v4().to_string();
+            let id     = Uuid::now_v7();
             let tags   = serde_json::to_string(&input.tags.unwrap_or_default())?;
             let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;
             let cover_path = input.images.as_ref()

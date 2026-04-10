@@ -1,17 +1,18 @@
 // worldflow_core/src/models/category.rs
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// 词条树状分类节点
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Category {
     /// 分类ID
-    pub id: String,
+    pub id: Uuid,
 
     /// 所属项目ID
-    pub project_id: String,
+    pub project_id: Uuid,
 
     /// 父级分类ID
-    pub parent_id: Option<String>,
+    pub parent_id: Option<Uuid>,
 
     /// 分类名称
     pub name: String,
@@ -28,15 +29,15 @@ pub struct Category {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateCategory {
-    pub project_id: String,
-    pub parent_id: Option<String>,
+    pub project_id: Uuid,
+    pub parent_id: Option<Uuid>,
     pub name: String,
     pub sort_order: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateCategory {
-    pub parent_id: Option<Option<String>>,  // None = 不更新, Some(None) = 移到根节点
+    pub parent_id: Option<Option<Uuid>>,  // None = 不更新, Some(None) = 移到根节点
     pub name: Option<String>,
     pub sort_order: Option<i64>,
 }

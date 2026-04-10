@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use sqlx::types::Json;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FCImage {
@@ -11,15 +12,15 @@ pub struct FCImage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntryTag {
-    pub schema_id: String,
+    pub schema_id: Uuid,
     pub value:     serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
-    pub id:          String,
-    pub project_id:  String,
-    pub category_id: Option<String>,
+    pub id:          Uuid,
+    pub project_id:  Uuid,
+    pub category_id: Option<Uuid>,
     pub title:       String,
     pub summary:     Option<String>,  // 新增
     pub content:     String,
@@ -31,13 +32,11 @@ pub struct Entry {
     pub updated_at:  String,
 }
 
-// 列表用：不含 content / tags，减少反序列化开销
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntryBrief {
-    pub id:          String,
-    pub project_id:  String,
-    pub category_id: Option<String>,
+    pub id:          Uuid,
+    pub project_id:  Uuid,
+    pub category_id: Option<Uuid>,
     pub title:       String,
     pub summary:     Option<String>,  // 新增
     pub r#type:      Option<String>,
@@ -47,8 +46,8 @@ pub struct EntryBrief {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateEntry {
-    pub project_id:  String,
-    pub category_id: Option<String>,
+    pub project_id:  Uuid,
+    pub category_id: Option<Uuid>,
     pub title:       String,
     pub summary:     Option<String>,  // 新增
     pub content:     Option<String>,
@@ -60,13 +59,13 @@ pub struct CreateEntry {
 
 #[derive(Debug, Clone, Default)]
 pub struct EntryFilter<'a> {
-    pub category_id: Option<&'a str>,
+    pub category_id: Option<&'a Uuid>,
     pub entry_type:  Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateEntry {
-    pub category_id: Option<Option<String>>,
+    pub category_id: Option<Option<Uuid>>,
     pub title:       Option<String>,
     pub summary:     Option<String>,  // 新增
     pub content:     Option<String>,

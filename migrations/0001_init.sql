@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS projects (
                                         id          TEXT PRIMARY KEY,
                                         name        TEXT NOT NULL,
                                         description TEXT,
-                                        cover_path  TEXT,
+                                        cover_image TEXT,
                                         created_at  TEXT NOT NULL DEFAULT (datetime('now')),
                                         updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );

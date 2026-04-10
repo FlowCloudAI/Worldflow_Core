@@ -1,5 +1,6 @@
 use worldflow_core::{models::*, CategoryOps, EntryOps, ProjectOps, SqliteDb, TagSchemaOps, EntryTypeOps};
 use worldflow_core::models::EntryFilter;
+use uuid::Uuid;
 
 async fn setup() -> SqliteDb {
     let db_path = format!(
@@ -14,12 +15,13 @@ async fn test_project_crud() {
     let db = setup().await;
 
     let project = db.create_project(CreateProject {
+        cover_image: None,
         name: "测试世界观".to_string(),
         description: Some("这是一个测试".to_string()),
     }).await.unwrap();
 
     assert_eq!(project.name, "测试世界观");
-    assert!(!project.id.is_empty());
+    assert_ne!(project.id, Uuid::nil());
 
     let fetched = db.get_project(&project.id).await.unwrap();
     assert_eq!(fetched.id, project.id);
@@ -27,6 +29,7 @@ async fn test_project_crud() {
     let updated = db.update_project(&project.id, UpdateProject {
         name: Some("改名后的世界观".to_string()),
         description: None,
+        cover_image: None,
     }).await.unwrap();
     assert_eq!(updated.name, "改名后的世界观");
     assert_eq!(updated.description, Some("这是一个测试".to_string()));
@@ -43,6 +46,7 @@ async fn test_category_tree() {
     let db = setup().await;
 
     let project = db.create_project(CreateProject {
+        cover_image: None,
         name: "分类树测试".to_string(),
         description: None,
     }).await.unwrap();
@@ -81,6 +85,7 @@ async fn test_entry_with_tags() {
     let db = setup().await;
 
     let project = db.create_project(CreateProject {
+        cover_image: None,
         name: "词条测试".to_string(),
         description: None,
     }).await.unwrap();
@@ -138,6 +143,7 @@ async fn test_inspect_data() {
     let db = setup().await;
 
     let project = db.create_project(CreateProject {
+        cover_image: None,
         name: "银河帝国".to_string(),
         description: Some("阿西莫夫风格的科幻世界观".to_string()),
     }).await.unwrap();
@@ -227,7 +233,7 @@ async fn test_is_builtin_type_function() {
 
     assert!(is_builtin_type("character"), "short key should be builtin");
     assert!(is_builtin_type("organization"), "short key should be builtin");
-    assert!(!is_builtin_type("550e8400-e29b-41d4-a716-446655440000"), "UUID should not be builtin");
+    assert!(!is_builtin_type("018f0d4e-6b30-7c2a-9f65-8d7b3a1c2e4f"), "UUID should not be builtin");
 }
 
 #[tokio::test]
@@ -247,6 +253,7 @@ async fn test_create_custom_entry_type() {
     let db = setup().await;
 
     let project = db.create_project(CreateProject {
+        cover_image: None,
         name: "自定义类型测试".to_string(),
         description: None,
     }).await.unwrap();
@@ -259,8 +266,8 @@ async fn test_create_custom_entry_type() {
         color: Some("#FF5733".to_string()),
     }).await.unwrap();
 
-    assert!(!custom_type.id.is_empty());
-    assert_eq!(custom_type.id.len(), 36, "ID should be UUID format");
+    assert_ne!(custom_type.id, Uuid::nil());
+    assert_eq!(custom_type.id.to_string().len(), 36, "ID should be UUID format");
     assert_eq!(custom_type.name, "自定义类型1");
     assert_eq!(custom_type.description, Some("这是一个自定义类型".to_string()));
     assert!(!custom_type.created_at.is_empty());
@@ -272,11 +279,13 @@ async fn test_custom_entry_type_unique_per_project() {
     let db = setup().await;
 
     let proj1 = db.create_project(CreateProject {
+        cover_image: None,
         name: "项目1".to_string(),
         description: None,
     }).await.unwrap();
 
     let proj2 = db.create_project(CreateProject {
+        cover_image: None,
         name: "项目2".to_string(),
         description: None,
     }).await.unwrap();
@@ -315,6 +324,7 @@ async fn test_update_custom_entry_type() {
     let db = setup().await;
 
     let project = db.create_project(CreateProject {
+        cover_image: None,
         name: "更新测试".to_string(),
         description: None,
     }).await.unwrap();
@@ -354,6 +364,7 @@ async fn test_delete_custom_entry_type_unused() {
     let db = setup().await;
 
     let project = db.create_project(CreateProject {
+        cover_image: None,
         name: "删除测试".to_string(),
         description: None,
     }).await.unwrap();
@@ -379,6 +390,7 @@ async fn test_delete_custom_entry_type_in_use() {
     let db = setup().await;
 
     let project = db.create_project(CreateProject {
+        cover_image: None,
         name: "使用中删除测试".to_string(),
         description: None,
     }).await.unwrap();
@@ -398,7 +410,7 @@ async fn test_delete_custom_entry_type_in_use() {
         title: "测试词条".to_string(),
         summary: None,
         content: Some("内容".to_string()),
-        r#type: Some(custom_type.id.clone()),
+        r#type: Some(custom_type.id.to_string()),
         tags: None,
         images: None,
     }).await.unwrap();
@@ -417,6 +429,7 @@ async fn test_list_all_entry_types_structure() {
     let db = setup().await;
 
     let project = db.create_project(CreateProject {
+        cover_image: None,
         name: "列表测试".to_string(),
         description: None,
     }).await.unwrap();
@@ -467,6 +480,7 @@ async fn test_list_custom_entry_types() {
     let db = setup().await;
 
     let project = db.create_project(CreateProject {
+        cover_image: None,
         name: "自定义类型列表测试".to_string(),
         description: None,
     }).await.unwrap();
@@ -491,6 +505,7 @@ async fn test_filter_entries_by_builtin_type() {
     let db = setup().await;
 
     let project = db.create_project(CreateProject {
+        cover_image: None,
         name: "内置类型过滤测试".to_string(),
         description: None,
     }).await.unwrap();
@@ -559,6 +574,7 @@ async fn test_filter_entries_by_custom_type_uuid() {
     let db = setup().await;
 
     let project = db.create_project(CreateProject {
+        cover_image: None,
         name: "自定义类型过滤测试".to_string(),
         description: None,
     }).await.unwrap();
@@ -579,15 +595,16 @@ async fn test_filter_entries_by_custom_type_uuid() {
         title: "使用自定义类型的词条".to_string(),
         summary: None,
         content: Some("内容".to_string()),
-        r#type: Some(custom_type.id.clone()),
+        r#type: Some(custom_type.id.to_string()),
         tags: None,
         images: None,
     }).await.unwrap();
 
     // 按自定义类型UUID过滤
+    let custom_type_id = custom_type.id.to_string();
     let filtered = db.list_entries(
         &project.id,
-        EntryFilter { entry_type: Some(&custom_type.id), ..Default::default() },
+        EntryFilter { entry_type: Some(custom_type_id.as_str()), ..Default::default() },
         100,
         0
     ).await.unwrap();
@@ -600,6 +617,7 @@ async fn test_cascade_delete_on_project_delete() {
     let db = setup().await;
 
     let project = db.create_project(CreateProject {
+        cover_image: None,
         name: "级联删除测试".to_string(),
         description: None,
     }).await.unwrap();

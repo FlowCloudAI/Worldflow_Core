@@ -28,7 +28,7 @@ fn row_to_relation(row: &sqlx::postgres::PgRow) -> Result<EntryRelation> {
 
 impl EntryRelationOps for PgDb {
     async fn create_relation(&self, input: CreateEntryRelation) -> Result<EntryRelation> {
-        let id = Uuid::new_v4().to_string();
+        let id = Uuid::now_v7();
 
         // two_way 关系规范化：强制 a_id < b_id，消除重复
         let (a_id, b_id) = if input.relation == RelationDirection::TwoWay && input.a_id > input.b_id {
@@ -54,7 +54,39 @@ impl EntryRelationOps for PgDb {
         row_to_relation(&row)
     }
 
-    async fn get_relation(&self, id: &str) -> Result<EntryRelation> {
+    async fn create_relations_bulk(&self, inputs: Vec<CreateEntryRelation>) -> Result<Vec<EntryRelation>> {
+        let mut tx = self.pool.begin().await?;
+        let mut relations = Vec::with_capacity(inputs.len());
+
+        for input in inputs {
+            let id = Uuid::now_v7();
+            let (a_id, b_id) = if input.relation == RelationDirection::TwoWay && input.a_id > input.b_id {
+                (input.b_id, input.a_id)
+            } else {
+                (input.a_id, input.b_id)
+            };
+
+            let row = sqlx::query(
+                "INSERT INTO entry_relations (id, project_id, a_id, b_id, relation, content)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 RETURNING id, project_id, a_id, b_id, relation, content, created_at::TEXT, updated_at::TEXT"
+            )
+                .bind(id)
+                .bind(input.project_id)
+                .bind(a_id)
+                .bind(b_id)
+                .bind(input.relation.as_str())
+                .bind(input.content)
+                .fetch_one(&mut *tx)
+                .await?;
+            relations.push(row_to_relation(&row)?);
+        }
+
+        tx.commit().await?;
+        Ok(relations)
+    }
+
+    async fn get_relation(&self, id: &Uuid) -> Result<EntryRelation> {
         let row = sqlx::query(
             "SELECT id, project_id, a_id, b_id, relation, content, created_at::TEXT, updated_at::TEXT
              FROM entry_relations WHERE id = $1"
@@ -67,7 +99,7 @@ impl EntryRelationOps for PgDb {
         row_to_relation(&row)
     }
 
-    async fn list_relations_for_entry(&self, entry_id: &str) -> Result<Vec<EntryRelation>> {
+    async fn list_relations_for_entry(&self, entry_id: &Uuid) -> Result<Vec<EntryRelation>> {
         let rows = sqlx::query(
             "SELECT id, project_id, a_id, b_id, relation, content, created_at::TEXT, updated_at::TEXT
              FROM entry_relations
@@ -82,7 +114,7 @@ impl EntryRelationOps for PgDb {
         rows.iter().map(row_to_relation).collect()
     }
 
-    async fn list_relations_for_project(&self, project_id: &str) -> Result<Vec<EntryRelation>> {
+    async fn list_relations_for_project(&self, project_id: &Uuid) -> Result<Vec<EntryRelation>> {
         let rows = sqlx::query(
             "SELECT id, project_id, a_id, b_id, relation, content, created_at::TEXT, updated_at::TEXT
              FROM entry_relations
@@ -96,7 +128,7 @@ impl EntryRelationOps for PgDb {
         rows.iter().map(row_to_relation).collect()
     }
 
-    async fn update_relation(&self, id: &str, input: UpdateEntryRelation) -> Result<EntryRelation> {
+    async fn update_relation(&self, id: &Uuid, input: UpdateEntryRelation) -> Result<EntryRelation> {
         let existing = self.get_relation(id).await?;
 
         // 如果变更为 two_way，需要规范化 a_id < b_id
@@ -128,7 +160,7 @@ impl EntryRelationOps for PgDb {
         row_to_relation(&row)
     }
 
-    async fn delete_relation(&self, id: &str) -> Result<()> {
+    async fn delete_relation(&self, id: &Uuid) -> Result<()> {
         let result = sqlx::query("DELETE FROM entry_relations WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
@@ -139,7 +171,7 @@ impl EntryRelationOps for PgDb {
         Ok(())
     }
 
-    async fn delete_relations_between(&self, entry_a: &str, entry_b: &str) -> Result<u64> {
+    async fn delete_relations_between(&self, entry_a: &Uuid, entry_b: &Uuid) -> Result<u64> {
         let result = sqlx::query(
             "DELETE FROM entry_relations
              WHERE (a_id = $1 AND b_id = $2)

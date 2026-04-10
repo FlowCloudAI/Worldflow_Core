@@ -1,14 +1,15 @@
 // worldflow_core/src/models/tag_schema.rs
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// 标签定义
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct TagSchema {
     /// 标签ID
-    pub id: String,
+    pub id: Uuid,
 
     /// 项目ID
-    pub project_id: String,
+    pub project_id: Uuid,
 
     /// 标签名称
     pub name: String,
@@ -43,7 +44,7 @@ pub struct TagSchema {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateTagSchema {
-    pub project_id: String,
+    pub project_id: Uuid,
     pub name: String,
     pub description: Option<String>,
     pub r#type: String,

@@ -1,6 +1,7 @@
 use worldflow_core::{SqliteDb, models::*, ProjectOps, CategoryOps, EntryOps, TagSchemaOps, EntryRelationOps, EntryTypeOps};
 use worldflow_core::models::EntryFilter;
 use std::{collections::HashMap, time::Instant};
+use uuid::Uuid;
 
 async fn setup() -> SqliteDb {
     let db_path = format!(
@@ -32,44 +33,53 @@ async fn stress_write_and_query() {
 
     for pi in 0..N_PROJECTS {
         let project = db.create_project(CreateProject {
+        cover_image: None,
             name: random_string("世界观", pi),
             description: Some(format!("压力测试项目 {pi}")),
         }).await.unwrap();
         project_ids.push(project.id.clone());
 
-        let mut category_ids = vec![];
-        for ci in 0..N_CATEGORIES / 2 {
-            let root = db.create_category(CreateCategory {
-                project_id: project.id.clone(),
-                parent_id: None,
-                name: random_string("分类", ci),
-                sort_order: Some(ci as i64),
-            }).await.unwrap();
-            let child = db.create_category(CreateCategory {
-                project_id: project.id.clone(),
-                parent_id: Some(root.id.clone()),
-                name: random_string("子分类", ci),
-                sort_order: Some(0),
-            }).await.unwrap();
+        let root_inputs: Vec<CreateCategory> = (0..N_CATEGORIES / 2).map(|ci| CreateCategory {
+            project_id: project.id.clone(),
+            parent_id: None,
+            name: random_string("分类", ci),
+            sort_order: Some(ci as i64),
+        }).collect();
+        let roots = db.create_categories_bulk(root_inputs).await.unwrap();
+
+        let child_inputs: Vec<CreateCategory> = roots.iter().enumerate().map(|(ci, root)| CreateCategory {
+            project_id: project.id.clone(),
+            parent_id: Some(root.id),
+            name: random_string("子分类", ci),
+            sort_order: Some(0),
+        }).collect();
+        let children = db.create_categories_bulk(child_inputs).await.unwrap();
+
+        let mut category_ids = Vec::with_capacity(N_CATEGORIES);
+        for root in roots {
             category_ids.push(root.id);
+        }
+        for child in children {
             category_ids.push(child.id);
         }
 
-        let mut schema_ids = vec![];
-        for si in 0..N_SCHEMAS {
-            let schema = db.create_tag_schema(CreateTagSchema {
-                project_id: project.id.clone(),
-                name: random_string("属性", si),
-                description: Some(format!("测试属性 {si}")),
-                r#type: if si % 2 == 0 { "number" } else { "string" }.to_string(),
-                target: vec!["character".to_string(), "item".to_string()],
-                default_val: Some("0".to_string()),
-                range_min: Some(0.0),
-                range_max: Some(1000.0),
-                sort_order: Some(si as i64),
-            }).await.unwrap();
-            schema_ids.push(schema.id);
-        }
+        let schema_inputs: Vec<CreateTagSchema> = (0..N_SCHEMAS).map(|si| CreateTagSchema {
+            project_id: project.id.clone(),
+            name: random_string("属性", si),
+            description: Some(format!("测试属性 {si}")),
+            r#type: if si % 2 == 0 { "number" } else { "string" }.to_string(),
+            target: vec!["character".to_string(), "item".to_string()],
+            default_val: Some("0".to_string()),
+            range_min: Some(0.0),
+            range_max: Some(1000.0),
+            sort_order: Some(si as i64),
+        }).collect();
+        let schema_ids: Vec<Uuid> = db.create_tag_schemas_bulk(schema_inputs)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|schema| schema.id)
+            .collect();
 
         let entry_types = ["character", "location", "item", "event", "concept"];
         let bulk_inputs: Vec<CreateEntry> = (0..N_ENTRIES).map(|ei| {
@@ -120,28 +130,29 @@ async fn stress_write_and_query() {
 
     // ── 关系写入 ──────────────────────────────────────────────
     let t_rel_write = Instant::now();
-    let mut relation_samples: Vec<(String, String)> = vec![];
+    let mut relation_samples: Vec<(Uuid, Uuid)> = vec![];
 
     for pid in &project_ids {
         let entries = db.list_entries(pid, EntryFilter::default(), N_ENTRIES, 0).await.unwrap();
         let directions = [RelationDirection::OneWay, RelationDirection::TwoWay];
+        let mut relation_inputs = Vec::with_capacity(N_RELATIONS);
 
         for ri in 0..N_RELATIONS {
             let a = &entries[ri * 7 % entries.len()];
             let b = &entries[(ri * 13 + 3) % entries.len()];
             if a.id == b.id { continue; }
 
-            let rel = db.create_relation(CreateEntryRelation {
+            relation_inputs.push(CreateEntryRelation {
                 project_id: pid.clone(),
                 a_id:       a.id.clone(),
                 b_id:       b.id.clone(),
                 relation:   directions[ri % 2].clone(),
                 content:    format!("关系内容_{ri}"),
-            }).await;
+            });
+        }
 
-            if let Ok(r) = rel {
-                relation_samples.push((a.id.clone(), r.id.clone()));
-            }
+        for relation in db.create_relations_bulk(relation_inputs).await.unwrap() {
+            relation_samples.push((relation.a_id, relation.id));
         }
     }
     println!("关系写入 x{}: {:.2}ms", N_PROJECTS * N_RELATIONS, t_rel_write.elapsed().as_millis());
@@ -153,21 +164,21 @@ async fn stress_write_and_query() {
     let t_type_create = Instant::now();
     for pi in 0..N_TYPE_PROJECTS {
         let project = db.create_project(CreateProject {
+        cover_image: None,
             name: random_string("类型项目", pi),
             description: None,
         }).await.unwrap();
         type_project_ids.push(project.id.clone());
 
-        for ti in 0..CUSTOM_TYPES_PER_PROJECT {
-            let custom_type = db.create_entry_type(CreateCustomEntryType {
-                project_id: project.id.clone(),
-                name: format!("custom_{}_{}", pi, ti),
-                description: Some(format!("自定义类型 {} in project {}", ti, pi)),
-                icon: Some("🎨".to_string()),
-                color: Some(format!("#{:06X}", (pi * 256 + ti * 10) % 0xFFFFFF)),
-            }).await.unwrap();
-            type_ids.push(custom_type.id.clone());
-        }
+        let type_inputs: Vec<CreateCustomEntryType> = (0..CUSTOM_TYPES_PER_PROJECT).map(|ti| CreateCustomEntryType {
+            project_id: project.id.clone(),
+            name: format!("custom_{}_{}", pi, ti),
+            description: Some(format!("自定义类型 {} in project {}", ti, pi)),
+            icon: Some("🎨".to_string()),
+            color: Some(format!("#{:06X}", (pi * 256 + ti * 10) % 0xFFFFFF)),
+        }).collect();
+        let custom_types = db.create_entry_types_bulk(type_inputs).await.unwrap();
+        type_ids.extend(custom_types.into_iter().map(|custom_type| custom_type.id));
     }
     println!("create {} type-projects with {} custom types each: {:.2}ms",
              N_TYPE_PROJECTS, CUSTOM_TYPES_PER_PROJECT, t_type_create.elapsed().as_millis());
@@ -179,12 +190,13 @@ async fn stress_write_and_query() {
             .await
             .unwrap_or_default()
             .iter()
-            .map(|ct| ct.id.clone())
+            .map(|ct| ct.id.to_string())
             .collect();
 
+        let mut bulk_inputs = Vec::with_capacity(project_types.len() * ENTRIES_PER_TYPE);
         for (ti, type_id) in project_types.iter().enumerate() {
             for ei in 0..ENTRIES_PER_TYPE {
-                db.create_entry(CreateEntry {
+                bulk_inputs.push(CreateEntry {
                     project_id:  pid.clone(),
                     category_id: None,
                     title:       random_string(&format!("entry_p{}_t{}", pi, ti), ei),
@@ -193,10 +205,11 @@ async fn stress_write_and_query() {
                     r#type:      Some(type_id.clone()),
                     tags:        None,
                     images:      None,
-                }).await.unwrap();
+                });
                 type_entry_count += 1;
             }
         }
+        db.create_entries_bulk(bulk_inputs).await.unwrap();
     }
     println!("create {} entries with custom types: {:.2}ms", type_entry_count, t_type_entries.elapsed().as_millis());
 
@@ -226,7 +239,7 @@ async fn stress_write_and_query() {
     }
     println!("list_entries full x{}: {:.2}ms", 20 * N_PROJECTS, t3.elapsed().as_millis());
 
-    let mut first_cat: HashMap<String, String> = HashMap::new();
+    let mut first_cat: HashMap<Uuid, Uuid> = HashMap::new();
     for pid in &project_ids {
         let cats = db.list_categories(pid).await.unwrap();
         if let Some(cat) = cats.first() {
@@ -282,9 +295,10 @@ async fn stress_write_and_query() {
     let mut filtered_count = 0;
     for type_id in &type_ids {
         if let Ok(custom_type) = db.get_entry_type(type_id).await {
+            let type_id_str = type_id.to_string();
             let entries = db.list_entries(
                 &custom_type.project_id,
-                EntryFilter { entry_type: Some(type_id), ..Default::default() },
+                EntryFilter { entry_type: Some(type_id_str.as_str()), ..Default::default() },
                 1000,
                 0,
             ).await.unwrap();

@@ -1,1181 +1,708 @@
-# Worldflow_core 核心库文档
+# worldflow_core
 
-## 🚀 快速预览
+`worldflow_core` 是一个 Rust 库，负责世界观/设定数据的核心存储层。
 
-### 是什么？
-Worldflow_core 是**世界观管理系统**的核心 Rust 库，提供：
-- 📚 词条（Entry）：管理小说/游戏/知识库条目
-- 🏢 项目（Project）：组织多个世界观
-- 🗂️ 分类（Category）：树状结构分类词条
-- 🏷️ 标签系统（TagSchema）：灵活的元数据标记
-- 🔗 词条关系（EntryRelation）：词条间的关联和网络
+它当前提供 6 组能力：
 
-### 核心特性
-| 特性 | 说明 |
-|------|------|
-| **数据库** | SQLite（生产就绪）+ PostgreSQL（已实现，feature flag 控制） |
-| **性能** | 自适应内存管理、FTS全文搜索、WAL 日志 |
-| **安全** | 外键约束、循环检测、事务支持 |
-| **灵活** | JSON 存储、树状分类、自定义标签 |
+- `Project`: 顶层项目容器
+- `Category`: 树状分类
+- `Entry`: 词条内容
+- `TagSchema`: 标签定义
+- `EntryRelation`: 词条关系
+- `EntryType`: 9 个内置类型 + 项目级自定义类型
 
-### 五分钟上手
-```rust
-use worldflow_core::SqliteDb;
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    // 1. 初始化数据库
-    let db = SqliteDb::new("sqlite://data.db").await?;
-
-    // 2. 创建项目
-    let project = db.create_project(CreateProject {
-        name: "我的世界观".to_string(),
-        description: Some("一个奇幻世界".to_string()),
-    }).await?;
-
-    // 3. 添加词条
-    let entry = db.create_entry(CreateEntry {
-        project_id: project.id.clone(),
-        title: "主角".to_string(),
-        category_id: None,
-        summary: Some("故事的主人公".to_string()),
-        content: Some("详细描述...".to_string()),
-        ..Default::new()
-    }).await?;
-
-    // 4. 搜索词条
-    let results = db.search_entries(&project.id, "主角", EntryFilter::default(), 10).await?;
-    
-    Ok(())
-}
-```
-
-### 核心概念速查表
-| 类型 | 作用 | 关键字段 |
-|------|------|---------|
-| Project | 顶级容器 | id, name, description |
-| Category | 分类（树状） | parent_id, sort_order |
-| Entry | 词条内容 | title, content, tags, images |
-| TagSchema | 标签定义 | type(number/string/boolean), target |
-| EntryRelation | 词条关系 | a_id, b_id, relation(one_way/two_way) |
+默认后端是 SQLite，可选启用 PostgreSQL。
 
 ---
 
-# 📖 完整文档
+## 给 Codex 的 60 秒接管版
 
-## 一、项目简介
+如果你是来接手这个仓库的，先记住这几件事：
 
-### 1.1 背景与目标
-Worldflow_core 是为内容创作者（小说、游戏、知识库）设计的**世界观管理系统**核心库。
+- 这是库，不是可执行程序；入口是 [src/lib.rs](src/lib.rs)。
+- 默认 feature 是 `sqlite`；只开 PostgreSQL 时要用 `--no-default-features --features postgres`。
+- 所有业务接口都通过 traits 暴露，定义在 [src/db/traits.rs](src/db/traits.rs)。
+- SQLite 实现在 [src/db](src/db)，PostgreSQL 实现在同目录的 `pg_*.rs`。
+- SQLite 初始化会自动开 `foreign_keys`、`WAL`、`synchronous=NORMAL`、自适应内存参数，并自动跑迁移。
+- PostgreSQL 初始化也会自动跑迁移。
+- 集成测试目前没有按 feature 做门控，`cargo test` 不能当成“仓库当前必过”的命令。
 
-**核心目标：**
-- 灵活存储复杂的内容关系（词条、分类、标签）
-- 高性能查询和全文搜索
-- 支持多项目、多用户场景
-- 为上层应用提供统一的数据访问接口
+建议的阅读顺序：
 
-### 1.2 主要模块
-```
+1. [src/lib.rs](src/lib.rs)
+2. [src/db/traits.rs](src/db/traits.rs)
+3. [src/models](src/models)
+4. [src/db/mod.rs](src/db/mod.rs)
+5. [migrations/0001_init.sql](migrations/0001_init.sql)
+6. [migrations_pg/0001_init.sql](migrations_pg/0001_init.sql)
+
+---
+
+## 仓库定位
+
+这个仓库专注于“设定数据层”，不是完整的多人协作应用。它负责：
+
+- 结构化存储项目、分类、词条、标签、关系、词条类型
+- 提供 SQLite / PostgreSQL 两套后端实现
+- 通过统一 traits 暴露 CRUD、搜索、过滤、批量写入能力
+- 通过迁移和触发器维护数据一致性
+
+它目前不提供：
+
+- 用户系统
+- 权限系统
+- 乐观锁/冲突解决机制
+- HTTP API
+- 前端界面
+
+如果上层要做多人协作、权限、审计、版本历史，需要在本库之上继续封装。
+
+---
+
+## 当前能力总览
+
+| 模块 | 核心结构 | 说明 |
+|---|---|---|
+| Project | `Project` / `CreateProject` / `UpdateProject` | 项目顶层容器，带可选封面 |
+| Category | `Category` / `CreateCategory` / `UpdateCategory` | 树状分类，支持循环检测 |
+| Entry | `Entry` / `EntryBrief` / `CreateEntry` / `UpdateEntry` | 核心词条内容，带标签、图片、类型 |
+| TagSchema | `TagSchema` / `CreateTagSchema` | 标签定义；更新接口也复用 `CreateTagSchema` |
+| EntryRelation | `EntryRelation` / `CreateEntryRelation` / `UpdateEntryRelation` | 词条关系，支持单向/双向 |
+| EntryType | `BuiltinEntryType` / `CustomEntryType` / `EntryTypeView` | 9 个内置类型 + 项目级自定义类型 |
+
+后端能力差异：
+
+| 项目 | SQLite | PostgreSQL |
+|---|---|---|
+| 默认启用 | 是 | 否 |
+| 连接入口 | `SqliteDb::new()` | `PgDb::new()` |
+| 迁移目录 | `migrations/` | `migrations_pg/` |
+| 搜索实现 | FTS5 `trigram`，索引 `title + content` | `to_tsvector('simple', title + summary + content)` + `plainto_tsquery` |
+| FTS 维护 | `optimize_fts()` | 无 |
+| 连接池上限 | 5 | 10 |
+
+---
+
+## 实际目录结构
+
+下面是当前仓库里真正有用的部分，不是概念图：
+
+```text
 worldflow_core/
-├── models/                 # 数据模型定义
-│   ├── project.rs
-│   ├── category.rs
-│   ├── entry.rs
-│   ├── tag_schema.rs
-│   └── entry_relation.rs
-├── db/                     # 数据库实现
-│   ├── mod.rs              # SqliteDb / PgDb 结构体 + 初始化
-│   ├── traits.rs           # Db trait 定义（ProjectOps 等）
-│   ├── project.rs          # SQLite 实现
-│   ├── category.rs
-│   ├── entry.rs
-│   ├── tag_schema.rs
-│   ├── entry_relation.rs
-│   ├── pg_project.rs       # PostgreSQL 实现
-│   ├── pg_category.rs
-│   ├── pg_entry.rs
-│   ├── pg_tag_schema.rs
-│   └── pg_entry_relation.rs
-├── error.rs                # 错误定义
-└── lib.rs                  # 库入口 + trait 重导出
+├── Cargo.toml
+├── migrations/
+│   └── 0001_init.sql
+├── migrations_pg/
+│   └── 0001_init.sql
+├── src/
+│   ├── lib.rs
+│   ├── error.rs
+│   ├── models/
+│   │   ├── mod.rs
+│   │   ├── project.rs
+│   │   ├── category.rs
+│   │   ├── entry.rs
+│   │   ├── tag_schema.rs
+│   │   ├── entry_relation.rs
+│   │   └── entry_type.rs
+│   └── db/
+│       ├── mod.rs
+│       ├── traits.rs
+│       ├── sqlite.rs
+│       ├── postgres.rs
+│       ├── project.rs
+│       ├── category.rs
+│       ├── entry.rs
+│       ├── tag_schema.rs
+│       ├── entry_relation.rs
+│       ├── entry_type.rs
+│       ├── pg_project.rs
+│       ├── pg_category.rs
+│       ├── pg_entry.rs
+│       ├── pg_tag_schema.rs
+│       ├── pg_entry_relation.rs
+│       └── pg_entry_type.rs
+└── tests/
+    ├── db.rs
+    ├── stress_test.rs
+    └── stress_test_pg.rs
 ```
 
 ---
 
-## 二、核心概念与数据模型
+## 依赖与环境
 
-### 2.1 数据关系图
-```
-Project (项目)
-  ├── Category (分类树)
-  │   └── parent_id → parent Category
-  ├── Entry (词条)
-  │   ├── category_id → Category
-  │   ├── tags[] → TagSchema
-  │   └── images[]
-  ├── TagSchema (标签定义)
-  │   └── target: ["character", "item", ...]
-  └── EntryRelation (词条关系)
-      ├── a_id → Entry
-      └── b_id → Entry
-```
+当前 crate 配置见 [Cargo.toml](Cargo.toml)：
 
-### 2.2 Project（项目）
-**作用：** 顶级容器，隔离不同的世界观
+- edition: `2024`
+- 默认 feature: `sqlite`
+- 可选 feature: `postgres`
 
-```rust
-pub struct Project {
-    pub id: String,                    // UUID
-    pub name: String,                  // 项目名称
-    pub description: Option<String>,   // 描述
-    pub cover_path: Option<String>,    // 项目封面路径
-    pub created_at: String,            // 创建时间
-    pub updated_at: String,            // 更新时间
-}
-```
+因此本地开发建议：
 
-**数据库表：**
-```sql
-CREATE TABLE projects (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    cover_path TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-```
+- 使用支持 Rust 2024 edition 的稳定版工具链
+- 如果要跑 PostgreSQL 相关内容，需要显式启用 `postgres` feature
 
-**常用操作：**
-```rust
-// 创建
-db.create_project(CreateProject { name, description }).await?;
+示例依赖写法：
 
-// 查询
-db.get_project(id).await?;
-db.list_projects().await?;
-
-// 更新
-db.update_project(id, UpdateProject { name, description }).await?;
-
-// 删除
-db.delete_project(id).await?;
-```
-
-### 2.3 Category（分类树）
-**作用：** 词条的分类系统，支持多层树状结构（无限深度）
-
-```rust
-pub struct Category {
-    pub id: String,               // UUID
-    pub project_id: String,       // 所属项目
-    pub parent_id: Option<String>,// 父级分类（None = 根节点）
-    pub name: String,             // 分类名称
-    pub sort_order: i64,          // 排序（同级）
-    pub created_at: String,
-    pub updated_at: String,
-}
-```
-
-**关键特性：**
-- ✅ 无限层级：支持任意深度嵌套
-- ✅ 循环检测：禁止将分类移到其子孙节点下
-- ✅ 树状排序：`parent_id NULLS FIRST, sort_order`
-
-**常用操作：**
-```rust
-// 创建根分类
-db.create_category(CreateCategory {
-    project_id: proj_id,
-    parent_id: None,  // 根节点
-    name: "人物".to_string(),
-    sort_order: Some(1),
-}).await?;
-
-// 创建子分类
-db.create_category(CreateCategory {
-    project_id: proj_id,
-    parent_id: Some(parent_cat_id),
-    name: "主角".to_string(),
-    sort_order: Some(1),
-}).await?;
-
-// 列出某项目的所有分类（树序）
-let categories = db.list_categories(&proj_id).await?;
-
-// 移动分类（自动检测循环）
-db.update_category(cat_id, UpdateCategory {
-    parent_id: Some(Some(new_parent_id)),  // Some(Some(...)) = 设置新父节点
-    ..Default::new()
-}).await?;
-
-// 移到根节点
-db.update_category(cat_id, UpdateCategory {
-    parent_id: Some(None),  // Some(None) = 移到根
-    ..Default::new()
-}).await?;
-```
-
-**循环检测原理：**
-```sql
--- 检查 cat_id 的所有子孙中是否包含 new_parent_id
-WITH RECURSIVE descendants(id) AS (
-    SELECT id FROM categories WHERE id = ?
-    UNION ALL
-    SELECT c.id FROM categories c
-    JOIN descendants d ON c.parent_id = d.id
-)
-SELECT COUNT(*) FROM descendants WHERE id = ?
-```
-
-### 2.4 Entry（词条）
-**作用：** 核心内容单元，存储实际的世界观信息
-
-```rust
-pub struct Entry {
-    pub id: String,
-    pub project_id: String,
-    pub category_id: Option<String>,  // 可选归类
-    pub title: String,                // 词条标题
-    pub summary: Option<String>,      // 摘要（新增）
-    pub content: String,              // 完整内容
-    pub r#type: Option<String>,       // 内容类型
-    pub tags: Json<Vec<EntryTag>>,    // 标签数组
-    pub images: Json<Vec<FCImage>>,   // 图像数组
-    pub cover_path: Option<String>,   // 封面（自动计算）
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-// 标签项
-pub struct EntryTag {
-    pub schema_id: String,            // 对应的 TagSchema.id
-    pub value: serde_json::Value,     // 标签值（任意 JSON）
-}
-
-// 图像信息
-pub struct FCImage {
-    pub path: PathBuf,
-    pub is_cover: bool,               // 是否为封面
-    pub caption: Option<String>,      // 图注
-}
-```
-
-**列表用轻量版：**
-```rust
-pub struct EntryBrief {
-    // 省略 content 和完整 tags，减少反序列化
-    pub id: String,
-    pub title: String,
-    pub summary: Option<String>,
-    pub cover: Option<PathBuf>,
-    pub updated_at: String,
-}
-```
-
-**常用操作：**
-```rust
-// 创建词条
-db.create_entry(CreateEntry {
-    project_id: proj_id,
-    category_id: Some(cat_id),
-    title: "阿瑞斯".to_string(),
-    summary: Some("战神".to_string()),
-    content: Some("强大的神灵...".to_string()),
-    tags: Some(vec![
-        EntryTag {
-            schema_id: tag_schema_id,
-            value: json!(80),
-        }
-    ]),
-    images: Some(vec![
-        FCImage {
-            path: "image.jpg".into(),
-            is_cover: true,
-            caption: Some("官方海报".to_string()),
-        }
-    ]),
-    ..Default::new()
-}).await?;
-
-// 获取完整词条（含所有数据）
-let entry = db.get_entry(&entry_id).await?;
-
-// 列表查询（分页，不含 content）
-let briefs = db.list_entries(&proj_id, EntryFilter { category_id: Some(&cat_id), ..Default::default() }, 20, 0).await?;
-
-// 全文搜索（FTS）
-let results = db.search_entries(&proj_id, "战神", EntryFilter::default(), 10).await?;
-
-// 统计词条数
-let count = db.count_entries(&proj_id, EntryFilter { category_id: Some(&cat_id), ..Default::default() }).await?;
-
-// 批量创建
-db.create_entries_bulk(entries).await?;
-```
-
-**性能优化：**
-- `EntryBrief`：列表操作省略 `content` 和完整标签，减少反序列化开销
-- **FTS 全文搜索**：基于 SQLite 虚拟表 `entries_fts`
-- **分页**：支持 LIMIT/OFFSET
-
-### 2.5 TagSchema（标签定义）
-**作用：** 定义可应用于词条的标签类型和约束
-
-```rust
-pub struct TagSchema {
-    pub id: String,
-    pub project_id: String,
-    pub name: String,                 // 标签名称
-    pub description: Option<String>,
-    pub r#type: String,               // "number" | "string" | "boolean"
-    pub target: String,               // JSON: ["character", "item", ...]
-    pub default_val: Option<String>,  // 默认值
-    pub range_min: Option<f64>,       // 数值范围（仅 type=number）
-    pub range_max: Option<f64>,
-    pub sort_order: i64,              // 排序
-    pub created_at: String,
-    pub updated_at: String,
-}
-```
-
-**约束校验：**
-- `type=number`：default_val 必须能解析为 f64
-- `type=boolean`：default_val 只能是 "true" 或 "false"
-- `range_min/max`：仅对数值类型有效
-
-**常用操作：**
-```rust
-// 创建标签定义
-db.create_tag_schema(CreateTagSchema {
-    project_id: proj_id,
-    name: "能力值".to_string(),
-    description: Some("角色基础属性".to_string()),
-    r#type: "number".to_string(),
-    target: vec!["character".to_string()],  // 仅可标记角色
-    default_val: Some("50".to_string()),
-    range_min: Some(0.0),
-    range_max: Some(100.0),
-    sort_order: Some(1),
-}).await?;
-
-// 查询标签定义
-db.get_tag_schema(&schema_id).await?;
-db.list_tag_schemas(&proj_id).await?;
-
-// 更新标签定义
-db.update_tag_schema(&schema_id, CreateTagSchema { ... }).await?;
-
-// 删除标签定义
-db.delete_tag_schema(&schema_id).await?;
-```
-
-### 2.6 EntryRelation（词条关系）
-**作用：** 建立词条间的关联关系（如人物关系、情节线索等）
-
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RelationDirection {
-    OneWay,  // 单向关系 (A → B)
-    TwoWay,  // 双向关系 (A ↔ B)
-}
-
-pub struct EntryRelation {
-    pub id:         String,              // UUID
-    pub project_id: String,              // 所属项目
-    pub a_id:       String,              // 词条A（单向时为源；双向时总是 < b_id）
-    pub b_id:       String,              // 词条B（单向时为目标；双向时总是 > a_id）
-    pub relation:   RelationDirection,   // 关系方向
-    pub content:    String,              // 关系描述
-    pub created_at: String,
-    pub updated_at: String,
-}
-```
-
-**关键特性：**
-- ✅ 单向/双向关系：灵活描述不同关系类型
-- ✅ 关系内容：自由文本描述关系的具体内容
-- ✅ 跨项目检查：确保关联的词条属于同一项目
-- ✅ 双向关系规范化：two_way 关系自动规范化为 `a_id < b_id`，消除重复
-
-**常用操作：**
-```rust
-// 创建关系
-db.create_relation(CreateEntryRelation {
-    project_id: proj_id,
-    a_id: char1_id,
-    b_id: char2_id,
-    relation: RelationDirection::TwoWay,
-    content: "相互爱恋的恋人".to_string(),
-}).await?;
-
-// 查询词条的所有关系
-let relations = db.list_relations_for_entry(&entry_id).await?;
-
-// 查询项目的所有关系（构建关系图）
-let all_relations = db.list_relations_for_project(&proj_id).await?;
-
-// 更新关系
-db.update_relation(&relation_id, UpdateEntryRelation {
-    relation: Some(RelationDirection::OneWay),
-    content: Some("单向喜欢".to_string()),
-}).await?;
-
-// 删除关系
-db.delete_relation(&relation_id).await?;
-
-// 删除两个词条间的所有关系
-db.delete_relations_between(&entry_a_id, &entry_b_id).await?;
-```
-
----
-
-## 三、快速开始
-
-### 3.1 初始化项目
-
-**依赖配置（Cargo.toml）：**
 ```toml
 [dependencies]
-worldflow_core = { path = "../worldflow_core" }            # 默认 SQLite
-# worldflow_core = { path = "../worldflow_core", features = ["postgres"] }  # 启用 PostgreSQL
+worldflow_core = { path = "../worldflow_core" }
 tokio = { version = "1", features = ["full"] }
 ```
 
-### 3.2 创建数据库连接
-```rust
-// SQLite
-use worldflow_core::{SqliteDb, ProjectOps, EntryOps}; // 按需导入 trait
+如果你只想用 PostgreSQL：
 
-let db = SqliteDb::new("sqlite://data.db").await?;
-// 自动：建表、启用外键、WAL 日志、自适应内存配置
-
-// PostgreSQL（需启用 feature = "postgres"）
-use worldflow_core::PgDb;
-
-let db = PgDb::new("postgres://user:pass@localhost/dbname").await?;
+```toml
+[dependencies]
+worldflow_core = { path = "../worldflow_core", default-features = false, features = ["postgres"] }
+tokio = { version = "1", features = ["full"] }
 ```
 
-**注：** 方法通过 trait 提供，使用前需将对应 trait 引入作用域：
-```rust
-use worldflow_core::{ProjectOps, CategoryOps, EntryOps, TagSchemaOps, EntryRelationOps};
-// 或一次性导入组合 trait：
-use worldflow_core::Db;
+如果你想同时保留两种后端能力：
+
+```toml
+[dependencies]
+worldflow_core = { path = "../worldflow_core", features = ["postgres"] }
+tokio = { version = "1", features = ["full"] }
 ```
 
-### 3.3 完整示例：创建世界观
+说明：
+
+- 默认已经包含 `sqlite`
+- 再加 `features = ["postgres"]` 就是“SQLite + PostgreSQL 都可用”
+
+---
+
+## 最小可用示例
+
+### SQLite
+
+这个示例按当前 API 可编译，不依赖 README 里的旧字段名。
 
 ```rust
-use worldflow_core::{SqliteDb, models::*};
+use worldflow_core::{
+    models::*,
+    EntryOps, ProjectOps, Result, SqliteDb,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let db = SqliteDb::new("sqlite://fantasy.db").await?;
+    let db = SqliteDb::new("sqlite:./worldflow_dev.db").await?;
 
-    // 1️⃣ 创建项目
     let project = db.create_project(CreateProject {
-        name: "龙与火焰".to_string(),
-        description: Some("一个奇幻世界".to_string()),
-    }).await?;
-    println!("项目创建: {:?}", project.id);
-
-    // 2️⃣ 创建分类结构
-    let role_cat = db.create_category(CreateCategory {
-        project_id: project.id.clone(),
-        parent_id: None,
-        name: "角色".to_string(),
-        sort_order: Some(1),
+        name: "我的世界观".to_string(),
+        description: Some("一个测试项目".to_string()),
+        cover_image: None,
     }).await?;
 
-    let hero_cat = db.create_category(CreateCategory {
-        project_id: project.id.clone(),
-        parent_id: Some(role_cat.id.clone()),
-        name: "主角".to_string(),
-        sort_order: Some(1),
-    }).await?;
-
-    // 3️⃣ 创建标签定义
-    let strength_tag = db.create_tag_schema(CreateTagSchema {
-        project_id: project.id.clone(),
-        name: "力量".to_string(),
-        r#type: "number".to_string(),
-        target: vec!["character".to_string()],
-        default_val: Some("50".to_string()),
-        range_min: Some(0.0),
-        range_max: Some(100.0),
-        ..Default::new()
-    }).await?;
-
-    // 4️⃣ 创建词条（带标签和图像）
     let entry = db.create_entry(CreateEntry {
         project_id: project.id.clone(),
-        category_id: Some(hero_cat.id.clone()),
-        title: "艾琳".to_string(),
-        summary: Some("故事的主人公".to_string()),
-        content: Some("艾琳是一位年轻的骑士...".to_string()),
+        category_id: None,
+        title: "主角".to_string(),
+        summary: Some("故事主人公".to_string()),
+        content: Some("详细设定内容".to_string()),
         r#type: Some("character".to_string()),
-        tags: Some(vec![
-            EntryTag {
-                schema_id: strength_tag.id,
-                value: serde_json::json!(85),
-            }
-        ]),
-        images: Some(vec![
-            FCImage {
-                path: "erin.jpg".into(),
-                is_cover: true,
-                caption: Some("官方设定".to_string()),
-            }
-        ]),
+        tags: None,
+        images: None,
     }).await?;
-    println!("词条创建: {}", entry.title);
 
-    // 5️⃣ 查询与搜索
-    let briefs = db.list_entries(&project.id, EntryFilter { category_id: Some(&hero_cat.id), ..Default::default() }, 10, 0).await?;
-    println!("分类词条数: {}", briefs.len());
+    let hits = db.search_entries(&project.id, "主角", EntryFilter::default(), 10).await?;
 
-    let search_results = db.search_entries(&project.id, "艾琳", EntryFilter::default(), 10).await?;
-    println!("搜索结果: {}", search_results.len());
+    println!("entry_id={}", entry.id);
+    println!("hits={}", hits.len());
+    Ok(())
+}
+```
 
-    // 6️⃣ 更新词条
-    let updated = db.update_entry(&entry.id, UpdateEntry {
-        summary: Some(Some("勇敢的骑士".to_string())),
-        ..Default::new()
+### PostgreSQL
+
+```rust
+use worldflow_core::{
+    models::*,
+    EntryOps, ProjectOps, Result, PgDb,
+};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let db = PgDb::new("postgres://postgres:password@localhost/worldflow_dev").await?;
+
+    let project = db.create_project(CreateProject {
+        name: "PG 世界观".to_string(),
+        description: None,
+        cover_image: None,
     }).await?;
-    println!("词条更新: {}", updated.summary.unwrap_or_default());
+
+    let _entry = db.create_entry(CreateEntry {
+        project_id: project.id.clone(),
+        category_id: None,
+        title: "地点 A".to_string(),
+        summary: Some("测试用词条".to_string()),
+        content: Some("这里是内容".to_string()),
+        r#type: Some("location".to_string()),
+        tags: None,
+        images: None,
+    }).await?;
 
     Ok(())
 }
 ```
 
+重要：
+
+- 方法不是直接定义在 struct 固有 impl 上，而是来自 traits
+- 所以示例里必须把 `ProjectOps`、`EntryOps` 等 trait 引入作用域
+
 ---
 
-## 四、API 文档
+## 你最容易踩到的 API 细节
 
-### 4.1 Project API
+### 1. `CreateEntry` 的类型字段叫 `r#type`
+
+不是 `entry_type`。
+
+实际定义在 [src/models/entry.rs](src/models/entry.rs)：
+
 ```rust
-// 创建
-pub async fn create_project(&self, input: CreateProject) -> Result<Project>;
-
-// 查询单个
-pub async fn get_project(&self, id: &str) -> Result<Project>;
-
-// 列表
-pub async fn list_projects(&self) -> Result<Vec<Project>>;
-
-// 更新
-pub async fn update_project(&self, id: &str, input: UpdateProject) -> Result<Project>;
-
-// 删除
-pub async fn delete_project(&self, id: &str) -> Result<()>;
+pub struct CreateEntry {
+    pub project_id: String,
+    pub category_id: Option<String>,
+    pub title: String,
+    pub summary: Option<String>,
+    pub content: Option<String>,
+    pub r#type: Option<String>,
+    pub tags: Option<Vec<EntryTag>>,
+    pub images: Option<Vec<FCImage>>,
+}
 ```
 
-### 4.2 Category API
+### 2. `UpdateEntry.summary` 不能表达“清空为 NULL”
+
+当前定义是：
+
 ```rust
-// 创建
-pub async fn create_category(&self, input: CreateCategory) -> Result<Category>;
-
-// 查询单个
-pub async fn get_category(&self, id: &str) -> Result<Category>;
-
-// 列表（全部，按树序排列）
-pub async fn list_categories(&self, project_id: &str) -> Result<Vec<Category>>;
-
-// 更新（支持移动）
-pub async fn update_category(&self, id: &str, input: UpdateCategory) -> Result<Category>;
-
-// 删除
-pub async fn delete_category(&self, id: &str) -> Result<()>;
-
-// 检查是否会形成循环
-pub async fn would_create_cycle(&self, id: &str, new_parent_id: &str) -> Result<bool>;
+pub struct UpdateEntry {
+    pub category_id: Option<Option<String>>,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub content: Option<String>,
+    pub r#type: Option<Option<String>>,
+    pub tags: Option<Vec<EntryTag>>,
+    pub images: Option<Vec<FCImage>>,
+}
 ```
 
-### 4.3 Entry API
+这意味着：
 
-**EntryFilter 结构体（支持灵活的多条件过滤）：**
+- `summary: None` 表示“不更新”
+- 没有 `Some(None)` 这种表达能力
+- 也就是说，当前 API 不能显式把 `summary` 清空成数据库 `NULL`
+
+### 3. `UpdateProject.cover_image` / `UpdateCategory.parent_id` / `UpdateEntry.category_id` / `UpdateEntry.r#type` 使用 `Option<Option<T>>`
+
+这几个字段有三态语义：
+
+- `None`: 不更新
+- `Some(Some(v))`: 更新为新值
+- `Some(None)`: 显式清空
+
+示例：
+
 ```rust
+let updated = db.update_project(&project.id, UpdateProject {
+    name: None,
+    description: None,
+    cover_image: Some(None),
+}).await?;
+```
+
+### 4. `TagSchema` 没有单独的 `UpdateTagSchema`
+
+更新接口仍然是：
+
+```rust
+async fn update_tag_schema(&self, id: &str, input: CreateTagSchema) -> Result<TagSchema>;
+```
+
+也就是说，更新标签定义时需要提供完整的 `CreateTagSchema` 结构。
+
+### 5. `EntryFilter` 目前只有两个条件
+
+```rust
+#[derive(Debug, Clone, Default)]
 pub struct EntryFilter<'a> {
-    pub category_id: Option<&'a str>,  // 按分类筛选
-    pub entry_type: Option<&'a str>,   // 按词条类型筛选（如 "character", "item" 等）
-}
-
-// 实现了 Default，方便无条件查询
-impl Default for EntryFilter<'_> {
-    fn default() -> Self {
-        EntryFilter { category_id: None, entry_type: None }
-    }
+    pub category_id: Option<&'a str>,
+    pub entry_type: Option<&'a str>,
 }
 ```
 
-**API 方法：**
+没有更多组合查询 DSL。
+
+---
+
+## 数据模型与行为说明
+
+### Project
+
+项目是顶级隔离单元。
+
+字段重点：
+
+- `id: String`
+- `name: String`
+- `description: Option<String>`
+- `cover_image: Option<String>`
+
+支持：
+
+- 创建
+- 单个查询
+- 列表查询
+- 更新
+- 删除
+
+删除项目会级联删除该项目下的：
+
+- categories
+- entries
+- tag_schemas
+- entry_relations
+- entry_types
+
+### Category
+
+分类是树状结构，支持无限层级。
+
+关键行为：
+
+- `would_create_cycle()` 会检查把某节点移动到新父节点下是否形成环
+- 应用层在 `update_category()` 时显式调用该检查
+
+删除分类的真实行为：
+
+- 子分类会级联删除
+- 引用这些分类的词条会因为 `entries.category_id ON DELETE SET NULL` 而失去分类绑定
+
+这不是“需要手动处理子分类”的实现。
+
+### Entry
+
+词条有两个主要视图：
+
+- `Entry`: 完整记录
+- `EntryBrief`: 列表优化版本，不带完整 `content`/`tags`
+
+与存储相关的事实：
+
+- `tags` 存成 JSON 文本
+- `images` 存成 JSON 文本
+- `cover_path` 从 `images` 中 `is_cover = true` 的图片路径提取
+- `content: None` 创建时会落成空字符串
+
+### TagSchema
+
+标签定义用于描述词条标签结构。
+
+当前约束：
+
+- `type` 只能是 `number` / `string` / `boolean`
+- `default_val` 会做基础校验
+- `range_min <= range_max`
+
+注意：
+
+- `target` 在模型层输入是 `Vec<String>`，落库后是 JSON 字符串
+
+### EntryRelation
+
+支持两种方向：
+
+- `one_way`
+- `two_way`
+
+行为要点：
+
+- `a_id != b_id`
+- 关系必须属于同一个项目
+- 双向关系会在应用层被规范成 `a_id < b_id`
+- SQLite 迁移里对乱序双向关系是触发器拒绝
+- PostgreSQL 迁移里对乱序双向关系是触发器自动交换
+
+### EntryType
+
+当前有 9 个内置类型：
+
+- `character`
+- `organization`
+- `location`
+- `item`
+- `creature`
+- `event`
+- `concept`
+- `culture`
+- `else`
+
+自定义类型存于 `entry_types` 表。
+
+实际接口：
+
+- `create_entry_type`
+- `get_entry_type`
+- `list_all_entry_types`
+- `list_custom_entry_types`
+- `update_entry_type`
+- `delete_entry_type`
+- `check_entry_type_in_use`
+
+约定：
+
+- 内置类型在内存中定义，不入库
+- 词条使用内置类型时，`Entry.r#type` 存 key
+- 词条使用自定义类型时，`Entry.r#type` 存 UUID 字符串
+
+---
+
+## 搜索、索引与性能
+
+### SQLite
+
+`SqliteDb::new()` 当前做这些事：
+
+1. 创建连接池，`max_connections = 5`
+2. `PRAGMA foreign_keys = ON`
+3. `PRAGMA journal_mode = WAL`
+4. `PRAGMA synchronous = NORMAL`
+5. 自动执行 `migrations/`
+6. 根据可用内存设置 `cache_size` / `mmap_size` / `temp_store`
+
+SQLite 搜索实现：
+
+- 使用 FTS5 虚拟表 `entries_fts`
+- tokenizer 是 `trigram`
+- 当前索引字段是 `title + content`
+- `summary` 没进 SQLite FTS 索引
+
+批量写入后可以手动做一次：
+
 ```rust
-// 创建
-pub async fn create_entry(&self, input: CreateEntry) -> Result<Entry>;
-
-// 获取完整词条
-pub async fn get_entry(&self, id: &str) -> Result<Entry>;
-
-// 列表（分页，返回 EntryBrief，支持按分类和类型过滤）
-pub async fn list_entries(
-    &self,
-    project_id: &str,
-    filter: EntryFilter<'_>,
-    limit: usize,
-    offset: usize,
-) -> Result<Vec<EntryBrief>>;
-
-// 全文搜索（支持按分类和类型过滤）
-pub async fn search_entries(
-    &self,
-    project_id: &str,
-    query: &str,
-    filter: EntryFilter<'_>,
-    limit: usize,
-) -> Result<Vec<EntryBrief>>;
-
-// 统计词条数（支持按分类和类型过滤）
-pub async fn count_entries(
-    &self,
-    project_id: &str,
-    filter: EntryFilter<'_>,
-) -> Result<i64>;
-
-// 更新
-pub async fn update_entry(&self, id: &str, input: UpdateEntry) -> Result<Entry>;
-
-// 删除
-pub async fn delete_entry(&self, id: &str) -> Result<()>;
-
-// 批量创建
-pub async fn create_entries_bulk(&self, inputs: Vec<CreateEntry>) -> Result<usize>;
-```
-
-**EntryFilter 使用示例：**
-```rust
-use worldflow_core::EntryFilter;
-
-// 示例 1：列出项目的所有词条（无过滤）
-let all = db.list_entries(&proj_id, EntryFilter::default(), 20, 0).await?;
-
-// 示例 2：列出特定分类下的所有词条
-let by_cat = db.list_entries(
-    &proj_id,
-    EntryFilter { category_id: Some(&cat_id), ..Default::default() },
-    20,
-    0
-).await?;
-
-// 示例 3：列出项目中所有 "character" 类型的词条
-let by_type = db.list_entries(
-    &proj_id,
-    EntryFilter { entry_type: Some("character"), ..Default::default() },
-    20,
-    0
-).await?;
-
-// 示例 4：列出特定分类且特定类型的词条
-let by_cat_and_type = db.list_entries(
-    &proj_id,
-    EntryFilter {
-        category_id: Some(&cat_id),
-        entry_type: Some("character"),
-    },
-    20,
-    0
-).await?;
-
-// 示例 5：搜索 "龙" 字，但只搜索 "event" 类型的词条
-let search_events = db.search_entries(
-    &proj_id,
-    "龙",
-    EntryFilter { entry_type: Some("event"), ..Default::default() },
-    10
-).await?;
-
-// 示例 6：统计某分类下的词条数
-let count = db.count_entries(
-    &proj_id,
-    EntryFilter { category_id: Some(&cat_id), ..Default::default() }
-).await?;
-```
-
-### 4.6 FTS 维护 API（仅 SQLite）
-```rust
-// 批量写入后调用，消除 FTS 碎片，恢复搜索性能
-pub async fn optimize_fts(&self) -> Result<()>;
-```
-
-**使用时机：** 每次 `create_entries_bulk` 之后调用一次即可：
-```rust
-db.create_entries_bulk(entries).await?;
 db.optimize_fts().await?;
 ```
 
-### 4.4 TagSchema API
-```rust
-// 创建
-pub async fn create_tag_schema(&self, input: CreateTagSchema) -> Result<TagSchema>;
+### PostgreSQL
 
-// 查询
-pub async fn get_tag_schema(&self, id: &str) -> Result<TagSchema>;
+`PgDb::new()` 当前做这些事：
 
-// 列表
-pub async fn list_tag_schemas(&self, project_id: &str) -> Result<Vec<TagSchema>>;
+1. 创建连接池，`max_connections = 10`
+2. 自动执行 `migrations_pg/`
 
-// 更新
-pub async fn update_tag_schema(&self, id: &str, input: CreateTagSchema) -> Result<TagSchema>;
+PostgreSQL 搜索实现：
 
-// 删除
-pub async fn delete_tag_schema(&self, id: &str) -> Result<()>;
-```
+- `to_tsvector('simple', title || summary || content)`
+- `plainto_tsquery('simple', $query)`
 
-### 4.5 EntryRelation API
-```rust
-// 创建词条关系
-pub async fn create_relation(&self, input: CreateEntryRelation) -> Result<EntryRelation>;
+因此 README 不应该宣称“明确支持 AND/OR/NOT 布尔查询语法”。按当前实现，查询字符串会按 `plainto_tsquery` 规则处理。
 
-// 查询单个关系
-pub async fn get_relation(&self, id: &str) -> Result<EntryRelation>;
+### 常用索引
 
-// 查询词条的所有关系（含双向）
-pub async fn list_relations_for_entry(&self, entry_id: &str) -> Result<Vec<EntryRelation>>;
+SQLite 与 PostgreSQL 都有这些主干索引：
 
-// 查询项目的所有关系（用于关系图）
-pub async fn list_relations_for_project(&self, project_id: &str) -> Result<Vec<EntryRelation>>;
-
-// 更新关系
-pub async fn update_relation(&self, id: &str, input: UpdateEntryRelation) -> Result<EntryRelation>;
-
-// 删除单个关系
-pub async fn delete_relation(&self, id: &str) -> Result<()>;
-
-// 删除两个词条间的所有关系
-pub async fn delete_relations_between(&self, entry_a: &str, entry_b: &str) -> Result<u64>;
-```
+- entries by `project_id`
+- entries by `category_id`
+- entries by `type`
+- categories by `project_id`
+- tag_schemas by `project_id`
+- relations by `a_id`
+- relations by `b_id`
+- relations by `project_id`
+- entry_types by `project_id`
 
 ---
 
-## 五、数据库设计与迁移
+## 迁移与数据库事实
 
-### 5.1 表结构
+SQLite 迁移文件：
 
-**projects**
-```sql
-CREATE TABLE projects (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    cover_path TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-```
+- [migrations/0001_init.sql](migrations/0001_init.sql)
 
-**categories**
-```sql
-CREATE TABLE categories (
-    id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    parent_id TEXT,
-    name TEXT NOT NULL,
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    CHECK (id != parent_id),
-    UNIQUE (project_id, id),
-    FOREIGN KEY (project_id, parent_id) REFERENCES categories(project_id, id) ON DELETE CASCADE
-);
-```
+PostgreSQL 迁移文件：
 
-**entries**
-```sql
-CREATE TABLE entries (
-    id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
-    title TEXT NOT NULL,
-    summary TEXT,
-    content TEXT NOT NULL DEFAULT '',
-    type TEXT,
-    tags TEXT NOT NULL DEFAULT '[]',          -- JSON
-    images TEXT NOT NULL DEFAULT '[]',        -- JSON
-    cover_path TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-```
+- [migrations_pg/0001_init.sql](migrations_pg/0001_init.sql)
 
-**tag_schemas**
-```sql
-CREATE TABLE tag_schemas (
-    id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    description TEXT,
-    type TEXT NOT NULL CHECK(type IN ('number', 'string', 'boolean')),
-    target TEXT NOT NULL DEFAULT '[]',  -- JSON array
-    default_val TEXT,
-    range_min REAL,
-    range_max REAL,
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    CHECK (range_min IS NULL OR range_max IS NULL OR range_min <= range_max)
-);
-```
+当前迁移已经包含：
 
-**entry_relations**
-```sql
-CREATE TABLE entry_relations (
-    id         TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    a_id       TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
-    b_id       TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
-    relation   TEXT NOT NULL CHECK(relation IN ('one_way', 'two_way')),
-    content    TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (a_id, b_id, content)
-);
-```
+- 表创建
+- 触发器
+- 索引
+- FTS/tsvector 相关结构
+- `entry_types` 表
 
-### 5.2 迁移文件位置
-```
-migrations/
-└── 0001_init.sql    -- 初始表创建和触发器
-```
+你不需要手动先跑 `sqlx migrate run` 才能使用库，只要调用 `SqliteDb::new()` 或 `PgDb::new()`，库会自动执行迁移。
 
-迁移通过 `sqlx migrate!()` 宏自动运行，包含所有表创建和触发器定义。
+如果你只是用 SQLx CLI 做额外维护，那才需要手动命令。
 
 ---
 
-## 六、性能优化
+## 面向 Codex 的修改建议
 
-### 6.1 内存管理（SQLite）
+如果你接到需求要改这个仓库，通常按下面套路最快：
 
-**自适应策略：**
-系统根据可用内存自动配置：
+### 新增字段
 
-```rust
-// 初始化时自动检测
-let available_mb = sys.available_memory() / 1024 / 1024;
+1. 改对应模型
+2. 改 SQLite / PG 的 row mapping
+3. 改 `create_*` / `get_*` / `list_*` / `update_*`
+4. 改两套迁移
+5. 改 README 示例
+6. 补至少一个单元测试或集成测试
 
-match available_mb {
-    > 16000 => {
-        cache_size = -131072KB  (128MB)
-        mmap_size = 1GB
-        temp_store = MEMORY
-    }
-    > 8000  => {
-        cache_size = -65536KB   (64MB)
-        mmap_size = 512MB
-        temp_store = MEMORY
-    }
-    > 4000  => {
-        cache_size = -32768KB   (32MB)
-        mmap_size = 256MB
-        temp_store = MEMORY
-    }
-    else    => {
-        cache_size = -16384KB   (16MB)
-        mmap_size = 128MB
-        temp_store = DEFAULT
-    }
-}
-```
+### 新增模块
 
-**注：** 内存限制在初始化时通过自动检测设置，当前版本不支持运行时动态调整。
+1. 在 [src/models/mod.rs](src/models/mod.rs) 注册模型
+2. 在 [src/db/traits.rs](src/db/traits.rs) 加 trait 方法
+3. 实现 SQLite 版本
+4. 实现 PostgreSQL 版本
+5. 在 [src/db/mod.rs](src/db/mod.rs) 注册模块
+6. 写迁移
+7. 更新 README
 
-### 6.2 查询优化
+### 改搜索
 
-**索引策略：**
-```sql
--- 必要索引（自动创建）
-CREATE INDEX idx_entries_project_id ON entries(project_id);
-CREATE INDEX idx_entries_category_id ON entries(category_id);
-CREATE INDEX idx_categories_project_id ON categories(project_id);
-CREATE INDEX idx_tag_schemas_project_id ON tag_schemas(project_id);
-```
+先确认你到底想改哪一端：
 
-**列表查询优化：**
-- ✅ 使用 `EntryBrief` 避免反序列化大量数据
-- ✅ 分页查询使用 LIMIT/OFFSET
-- ✅ 预计算 `cover_path` 字段
+- SQLite 搜索在 [src/db/entry.rs](src/db/entry.rs)
+- PostgreSQL 搜索在 [src/db/pg_entry.rs](src/db/pg_entry.rs)
 
-**全文搜索优化：**
-- ✅ FTS5 虚拟表（SQLite）/ GIN 索引 + tsvector（PostgreSQL）
-- ✅ 支持布尔查询（AND, OR, NOT）
-- ✅ 示例：`db.search_entries(proj, "dragon AND fire", 20).await?`
-- ✅ 批量写入后调用 `optimize_fts()` 消除碎片（SQLite）
+这两套实现现在不是完全等价的，尤其是：
 
-### 6.3 并发控制
-
-**连接池配置：**
-```rust
-SqlitePoolOptions::new()
-    .max_connections(5)  // SQLite 推荐值
-    .connect(database_url)
-    .await?
-```
-
-**事务支持：**
-```rust
-let mut tx = db.pool.begin().await?;
-// ... 多个操作 ...
-tx.commit().await?;
-```
+- SQLite 不搜 `summary`
+- PostgreSQL 搜 `summary`
+- PostgreSQL 用 `plainto_tsquery`
 
 ---
 
-## 七、错误处理
+## 实用命令
 
-### 7.1 错误类型
+### 只检查库本体
 
-```rust
-pub enum WorldflowError {
-    #[error("数据库错误: {0}")]
-    Database(#[from] sqlx::Error),
+默认 SQLite：
 
-    #[error("迁移错误: {0}")]
-    Migration(#[from] sqlx::migrate::MigrateError),
-
-    #[error("记录不存在: {0}")]
-    NotFound(String),  // 如 "category 123"
-
-    #[error("序列化错误: {0}")]
-    Serialization(#[from] serde_json::Error),
-
-    #[error("参数错误: {0}")]
-    InvalidInput(String),  // 如循环分类、非法数值范围
-}
-
-pub type Result<T> = std::result::Result<T, WorldflowError>;
-```
-
-### 7.2 常见错误处理
-```rust
-use worldflow_core::error::WorldflowError;
-
-match db.get_entry(&id).await {
-    Ok(entry) => { /* 处理 */ },
-    Err(WorldflowError::NotFound(msg)) => {
-        eprintln!("未找到: {}", msg);
-    },
-    Err(WorldflowError::InvalidInput(msg)) => {
-        eprintln!("输入错误: {}", msg);
-    },
-    Err(e) => {
-        eprintln!("其他错误: {}", e);
-    }
-}
-```
-
----
-
-## 八、常见问题
-
-### Q1: 如何实现"多人协作编辑"？
-**A:** 使用 `updated_at` 字段实现乐观锁：
-```rust
-// 检查是否已被修改
-let current = db.get_entry(&id).await?;
-if current.updated_at != original_updated_at {
-    return Err(WorldflowError::InvalidInput("数据已被修改".to_string()));
-}
-// 继续更新...
-```
-
-### Q2: 如何处理删除分类时的子分类？
-**A:** 暂无自动级联，需要手动处理：
-```rust
-// 1. 查出所有子分类
-let children = db.list_categories(&project_id).await?
-    .into_iter()
-    .filter(|c| c.parent_id == Some(cat_id.to_string()))
-    .collect::<Vec<_>>();
-
-// 2. 选择操作：删除 / 移动 / 不删除
-for child in children {
-    db.update_category(&child.id, UpdateCategory {
-        parent_id: Some(None),  // 移到根
-        ..Default::new()
-    }).await?;
-}
-
-// 3. 删除分类
-db.delete_category(&cat_id).await?;
-```
-
-### Q3: 搜索的性能如何？
-**A:** FTS 查询速度很快（通常 <100ms）。大量写入后搜索可能变慢（FTS 碎片化），调用 `optimize_fts()` 即可恢复：
-```rust
-db.create_entries_bulk(data).await?;
-db.optimize_fts().await?;  // 批量写入后调用
-```
-
-### Q4: 支持什么类型的图像？
-**A:** 系统仅存储路径，不验证格式。支持：
-- 本地路径：`/data/images/hero.jpg`
-- URL：`https://example.com/image.png`
-- 相对路径：`images/hero.jpg`
-
-### Q5: 如何备份数据库？
-**A:** SQLite 备份很简单：
 ```bash
-# 关闭应用后
-cp data.db data.db.backup
+cargo check --lib
 ```
 
----
+只检查 PostgreSQL 版本：
 
-## 九、扩展与贡献
-
-### 9.1 PostgreSQL 支持
-
-**已实现**，通过 feature flag 启用：
-```toml
-worldflow_core = { path = "...", features = ["postgres"] }
-```
-
-**架构：** 所有操作通过 trait 定义，SQLite 和 PostgreSQL 分别实现：
-```rust
-// 泛型函数可同时支持两种后端
-async fn do_work(db: &impl Db) {
-    db.create_project(...).await?;
-}
-
-// 或具体类型
-let sqlite_db = SqliteDb::new("sqlite://data.db").await?;
-let pg_db     = PgDb::new("postgres://...").await?;
-```
-
-**主要差异：**
-| | SQLite | PostgreSQL |
-|---|---|---|
-| 参数占位符 | `?` | `$1, $2, ...` |
-| 全文搜索 | FTS5 虚拟表 | GIN + tsvector |
-| 时间类型 | TEXT | TIMESTAMPTZ（查询时转 TEXT） |
-| 连接数 | max 5 | max 10 |
-| 迁移目录 | `migrations/` | `migrations_pg/` |
-
-### 9.2 新增功能建议
-
-**潜在扩展：**
-- [ ] 版本历史（词条变更记录）
-- [ ] 权限系统（分享、协作权限）
-- [ ] 批量操作 API 扩展
-- [ ] WebAssembly 支持
-
-### 9.3 代码贡献规范
-
-**新增模块 X 的目录结构：**
-```
-models/x.rs          -- 数据模型
-db/traits.rs         -- 在对应 trait 中添加方法
-db/x.rs              -- impl XxxOps for SqliteDb
-db/pg_x.rs           -- impl XxxOps for PgDb
-更新 models/mod.rs 和 db/mod.rs
-```
-
-**测试建议：**
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_xxx() {
-        let db = SqliteDb::new("sqlite://:memory:").await.unwrap();
-        // 测试代码...
-    }
-}
-```
-
----
-
-## 十、FAQ - 开发维护
-
-### 如何本地开发？
-
-**环境要求：**
-- Rust 1.70+
-- SQLx CLI（用于迁移）
-
-**本地运行：**
 ```bash
-# 安装 SQLx CLI
+cargo check --lib --no-default-features --features postgres
+```
+
+### 只跑库内单元测试
+
+默认 SQLite：
+
+```bash
+cargo test --lib
+```
+
+只跑 PostgreSQL feature 下的库内单元测试：
+
+```bash
+cargo test --lib --no-default-features --features postgres
+```
+
+### SQLx CLI
+
+只有在你需要手动管理数据库时再用：
+
+```bash
 cargo install sqlx-cli
-
-# 创建本地数据库
-sqlx database create
-
-# 运行迁移
 sqlx migrate run
-
-# 运行测试
-cargo test --all
-
-# 查看文档
-cargo doc --open
 ```
 
-### 版本管理策略
+---
 
-遵循 Semantic Versioning：
-- **主版本**：API 不兼容变更
-- **次版本**：新功能（向后兼容）
-- **补丁版本**：bug 修复
+## 当前测试现状
+
+仓库里有 3 个集成测试文件：
+
+- [tests/db.rs](tests/db.rs)
+- [tests/stress_test.rs](tests/stress_test.rs)
+- [tests/stress_test_pg.rs](tests/stress_test_pg.rs)
+
+当前已确认的事实：
+
+- `cargo check --lib` 通过
+- `cargo check --lib --no-default-features --features postgres` 通过
+- `cargo test --lib` 通过
+- `cargo test --lib --no-default-features --features postgres` 通过
+
+当前仓库的已知问题：
+
+- 集成测试没有按 feature 做门控
+- 因此默认 `cargo test` 会去编译 PostgreSQL 压测文件并失败
+- PostgreSQL-only 的 `cargo test --no-default-features --features postgres` 又会反过来被 SQLite 集成测试卡住
+
+所以在测试组织修复前，不要在 README 里宣称 `cargo test` 或 `cargo test --all` 是当前可靠入口。
 
 ---
 
-## 总结
+## 常见误解澄清
 
-| 模块             | 职责   | 核心类型              |
-|----------------|------|-------------------|
-| **Project**    | 项目容器 | Project           |
-| **Category**   | 分类树  | Category（支持循环检测）  |
-| **Entry**      | 词条内容 | Entry, EntryBrief |
-| **TagSchema**  | 标签定义 | TagSchema（支持类型约束） |
-| **EntryRelation** | 词条关系 | EntryRelation（单向/双向） |
+### “这个库已经支持多人协作”
 
-**关键设计决策：**
-- ✅ Trait 架构：`ProjectOps` 等子 trait + `Db` 组合 trait，SQLite/PG 均实现
-- ✅ SQLite + WAL：轻量、适合嵌入式
-- ✅ PostgreSQL：feature flag 启用，适合多用户/云部署
-- ✅ JSON 存储：灵活，支持自定义数据
-- ✅ FTS5 / GIN：高性能全文搜索，`optimize_fts()` 消除碎片
-- ✅ 自适应内存：SQLite 自动优化性能
-- ✅ 树状分类：无限层级 + 循环检测
+不准确。
+
+更准确的说法是：
+
+- 它适合作为多人协作系统的数据核心
+- 但库本身没有用户、权限、锁、审计、冲突处理
+
+### “删除分类需要手动处理所有子分类”
+
+不准确。
+
+真实行为是：
+
+- 子分类会级联删除
+- 相关词条会失去 `category_id`
+
+### “README 里的旧示例可以直接复制”
+
+不准确。
+
+旧版 README 曾混入这些过时写法：
+
+- `Default::new()`
+- `entry_type`
+- `summary: Some(Some(...))`
+- `list_entries(..., None)`
+
+当前这份 README 已改成与现有 API 对齐的版本。
 
 ---
 
-**文档版本：** 1.3
-**最后更新：** 2026-04-04
-**维护者：** Worldflow 开发团队
+## 建议优先查看的文件
+
+如果你只看 10 个文件，建议看这些：
+
+1. [src/lib.rs](src/lib.rs)
+2. [src/db/traits.rs](src/db/traits.rs)
+3. [src/db/mod.rs](src/db/mod.rs)
+4. [src/models/entry.rs](src/models/entry.rs)
+5. [src/models/entry_type.rs](src/models/entry_type.rs)
+6. [src/db/entry.rs](src/db/entry.rs)
+7. [src/db/pg_entry.rs](src/db/pg_entry.rs)
+8. [src/db/entry_type.rs](src/db/entry_type.rs)
+9. [migrations/0001_init.sql](migrations/0001_init.sql)
+10. [migrations_pg/0001_init.sql](migrations_pg/0001_init.sql)
 
 ---
 
-## 更新日志
+## 版本说明
 
-### v1.3 (2026-04-04)
-- ✨ 新增：`EntryFilter` 结构体支持灵活多条件过滤（按分类、词条类型）
-- 📝 更新：`list_entries`、`search_entries`、`count_entries` 等方法增加 `EntryFilter` 参数
-- 📚 更新：API 文档和示例，展示 `EntryFilter` 的各种使用场景
-- ✅ 改进：支持同时按分类和类型过滤词条
+当前 crate 版本见 [Cargo.toml](Cargo.toml)。
 
-### v1.2 (2026-04-02)
-- ✨ 新增：PostgreSQL 支持（`features = ["postgres"]`，`PgDb` 结构体）
-- ✨ 新增：Trait 架构（`ProjectOps`/`CategoryOps`/`EntryOps`/`TagSchemaOps`/`EntryRelationOps`/`Db`）
-- ✨ 新增：`optimize_fts()` 方法，消除批量写入后的 FTS 碎片
-- 📚 更新：lib.rs 重导出所有 trait，使用方无需手动导入路径
+如果后续你要继续维护 README，建议遵守两条：
 
-### v1.1 (2026-04-02)
-- ✨ 新增：EntryRelation 模块支持词条间的关系管理（单向/双向）
-- 🗑️ 移除：AppSetting 全局配置模块
-- 📦 整合：将 FTS 全文搜索与初始化合并到单一迁移文件
-
-### v1.0 (2026-03-23)
-- 初始版本发布
-- 核心模块：Project、Category、Entry、TagSchema
-- SQLite 支持和性能优化
+- 文档示例必须先对照真实 struct 字段和 trait 签名
+- 文档里的命令必须先在当前 feature 组合下实际跑过

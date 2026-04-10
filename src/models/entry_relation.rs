@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -26,10 +27,10 @@ impl RelationDirection {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntryRelation {
-    pub id:         String,
-    pub project_id: String,
-    pub a_id:       String,
-    pub b_id:       String,
+    pub id:         Uuid,
+    pub project_id: Uuid,
+    pub a_id:       Uuid,
+    pub b_id:       Uuid,
     pub relation:   RelationDirection,
     pub content:    String,
     pub created_at: String,
@@ -38,9 +39,9 @@ pub struct EntryRelation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateEntryRelation {
-    pub project_id: String,
-    pub a_id:       String,
-    pub b_id:       String,
+    pub project_id: Uuid,
+    pub a_id:       Uuid,
+    pub b_id:       Uuid,
     pub relation:   RelationDirection,
     pub content:    String,
 }

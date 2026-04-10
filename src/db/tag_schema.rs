@@ -39,7 +39,7 @@ impl TagSchemaOps for SqliteDb {
             }
         }
 
-        let id = Uuid::new_v4().to_string();
+        let id = Uuid::now_v7();
         let sort_order = input.sort_order.unwrap_or(0);
         let target = serde_json::to_string(&input.target)?;
 
@@ -66,7 +66,55 @@ impl TagSchemaOps for SqliteDb {
         row_to_tag_schema(&row)
     }
 
-    async fn get_tag_schema(&self, id: &str) -> Result<TagSchema> {
+    async fn create_tag_schemas_bulk(&self, inputs: Vec<CreateTagSchema>) -> Result<Vec<TagSchema>> {
+        let mut tx = self.pool.begin().await?;
+        let mut schemas = Vec::with_capacity(inputs.len());
+
+        for input in inputs {
+            if let Some(ref val) = input.default_val {
+                if input.r#type == "number" && val.parse::<f64>().is_err() {
+                    return Err(WorldflowError::InvalidInput(
+                        format!("default_val '{}' 不是合法数字", val)
+                    ));
+                }
+                if input.r#type == "boolean" && val != "true" && val != "false" {
+                    return Err(WorldflowError::InvalidInput(
+                        format!("default_val '{}' 不是合法布尔值", val)
+                    ));
+                }
+            }
+
+            let id = Uuid::now_v7();
+            let sort_order = input.sort_order.unwrap_or(0);
+            let target = serde_json::to_string(&input.target)?;
+
+            let row = sqlx::query(
+                "INSERT INTO tag_schemas
+                 (id, project_id, name, description, type, target, default_val, range_min, range_max, sort_order)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 RETURNING id, project_id, name, description, type, target,
+                           default_val, range_min, range_max, sort_order, created_at, updated_at"
+            )
+                .bind(id)
+                .bind(input.project_id)
+                .bind(input.name)
+                .bind(input.description)
+                .bind(input.r#type)
+                .bind(target)
+                .bind(input.default_val)
+                .bind(input.range_min)
+                .bind(input.range_max)
+                .bind(sort_order)
+                .fetch_one(&mut *tx)
+                .await?;
+            schemas.push(row_to_tag_schema(&row)?);
+        }
+
+        tx.commit().await?;
+        Ok(schemas)
+    }
+
+    async fn get_tag_schema(&self, id: &Uuid) -> Result<TagSchema> {
         let row = sqlx::query(
             "SELECT id, project_id, name, description, type, target,
                     default_val, range_min, range_max, sort_order, created_at, updated_at
@@ -80,7 +128,7 @@ impl TagSchemaOps for SqliteDb {
         row_to_tag_schema(&row)
     }
 
-    async fn list_tag_schemas(&self, project_id: &str) -> Result<Vec<TagSchema>> {
+    async fn list_tag_schemas(&self, project_id: &Uuid) -> Result<Vec<TagSchema>> {
         let rows = sqlx::query(
             "SELECT id, project_id, name, description, type, target,
                     default_val, range_min, range_max, sort_order, created_at, updated_at
@@ -95,7 +143,7 @@ impl TagSchemaOps for SqliteDb {
         rows.iter().map(row_to_tag_schema).collect()
     }
 
-    async fn update_tag_schema(&self, id: &str, input: CreateTagSchema) -> Result<TagSchema> {
+    async fn update_tag_schema(&self, id: &Uuid, input: CreateTagSchema) -> Result<TagSchema> {
         self.get_tag_schema(id).await?;
         let target = serde_json::to_string(&input.target)?;
 
@@ -128,7 +176,7 @@ impl TagSchemaOps for SqliteDb {
         row_to_tag_schema(&row)
     }
 
-    async fn delete_tag_schema(&self, id: &str) -> Result<()> {
+    async fn delete_tag_schema(&self, id: &Uuid) -> Result<()> {
         let result = sqlx::query("DELETE FROM tag_schemas WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
