@@ -6,7 +6,10 @@
       "Bash(cargo test:*)",
       "Bash(cargo build:*)",
       "Bash(rm -f worldflow_dev.db*)",
-      "Bash(DATABASE_URL=\"postgres://postgres:password@localhost/worldflow_dev\" cargo test --test stress_test_pg --features postgres)"
+      "Bash(DATABASE_URL=\"postgres://postgres:password@localhost/worldflow_dev\" cargo test --test stress_test_pg --features postgres)",
+      "Bash(taskkill /f /im \"stress_test-6fb43c432249588a.exe\")",
+      "Bash(taskkill /F /IM \"stress_test*\")",
+      "Bash(cmd /c \"taskkill /F /IM stress_test*.exe\")"
     ]
   }
 }

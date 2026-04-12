@@ -27,12 +27,12 @@ impl RelationDirection {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntryRelation {
-    pub id:         Uuid,
+    pub id: Uuid,
     pub project_id: Uuid,
-    pub a_id:       Uuid,
-    pub b_id:       Uuid,
-    pub relation:   RelationDirection,
-    pub content:    String,
+    pub a_id: Uuid,
+    pub b_id: Uuid,
+    pub relation: RelationDirection,
+    pub content: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -40,14 +40,14 @@ pub struct EntryRelation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateEntryRelation {
     pub project_id: Uuid,
-    pub a_id:       Uuid,
-    pub b_id:       Uuid,
-    pub relation:   RelationDirection,
-    pub content:    String,
+    pub a_id: Uuid,
+    pub b_id: Uuid,
+    pub relation: RelationDirection,
+    pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateEntryRelation {
     pub relation: Option<RelationDirection>,
-    pub content:  Option<String>,
+    pub content: Option<String>,
 }

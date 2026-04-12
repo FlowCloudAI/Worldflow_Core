@@ -1,15 +1,15 @@
+use crate::error::{Result, WorldflowError};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::error::{Result, WorldflowError};
 
 /// 内置词条类型定义
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuiltinEntryType {
-    pub key: &'static str,              // 短标识符，如 "character"
-    pub name: &'static str,             // 显示名称，如 "人物"
-    pub description: &'static str,      // 描述信息
-    pub icon: &'static str,             // 图标（emoji 或 class 名称）
-    pub color: &'static str,            // 颜色（hex 或 rgb）
+    pub key: &'static str,         // 短标识符，如 "character"
+    pub name: &'static str,        // 显示名称，如 "人物"
+    pub description: &'static str, // 描述信息
+    pub icon: &'static str,        // 图标（emoji 或 class 名称）
+    pub color: &'static str,       // 颜色（hex 或 rgb）
 }
 
 /// 9 个内置词条类型常量数组
@@ -82,7 +82,7 @@ pub const BUILTIN_ENTRY_TYPES: &[BuiltinEntryType] = &[
 /// 自定义词条类型
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct CustomEntryType {
-    pub id: Uuid,                       // UUID
+    pub id: Uuid, // UUID
     pub project_id: Uuid,
     pub name: String,
     pub description: Option<String>,
@@ -106,7 +106,7 @@ pub struct CreateCustomEntryType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateCustomEntryType {
     pub name: Option<String>,
-    pub description: Option<Option<String>>,  // Option<Option<T>> 模式：None = 不更新，Some(None) = 清空
+    pub description: Option<Option<String>>, // Option<Option<T>> 模式：None = 不更新，Some(None) = 清空
     pub icon: Option<Option<String>>,
     pub color: Option<Option<String>>,
 }
@@ -192,9 +192,10 @@ pub fn get_builtin_type(key: &str) -> Option<&'static BuiltinEntryType> {
 /// 验证内置类型 key 的有效性
 pub fn validate_builtin_type_key(key: &str) -> Result<()> {
     if get_builtin_type(key).is_none() {
-        return Err(WorldflowError::InvalidInput(
-            format!("Invalid builtin entry type: {}", key),
-        ));
+        return Err(WorldflowError::InvalidInput(format!(
+            "Invalid builtin entry type: {}",
+            key
+        )));
     }
     Ok(())
 }

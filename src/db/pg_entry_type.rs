@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::{
     db::PgDb,
     error::{Result, WorldflowError},
-    models::{CustomEntryType, CreateCustomEntryType, UpdateCustomEntryType, EntryTypeView},
+    models::{CreateCustomEntryType, CustomEntryType, EntryTypeView, UpdateCustomEntryType},
 };
 
 use super::traits::EntryTypeOps;
@@ -18,10 +18,20 @@ fn row_to_custom_entry_type(row: &sqlx::postgres::PgRow) -> Result<CustomEntryTy
         description: row.try_get("description")?,
         icon: row.try_get("icon")?,
         color: row.try_get("color")?,
-        created_at: row.try_get::<String, _>("created_at")?
-            .replace("T", " ").split('+').next().unwrap_or("").to_string(),
-        updated_at: row.try_get::<String, _>("updated_at")?
-            .replace("T", " ").split('+').next().unwrap_or("").to_string(),
+        created_at: row
+            .try_get::<String, _>("created_at")?
+            .replace("T", " ")
+            .split('+')
+            .next()
+            .unwrap_or("")
+            .to_string(),
+        updated_at: row
+            .try_get::<String, _>("updated_at")?
+            .replace("T", " ")
+            .split('+')
+            .next()
+            .unwrap_or("")
+            .to_string(),
     })
 }
 
@@ -46,7 +56,10 @@ impl EntryTypeOps for PgDb {
         row_to_custom_entry_type(&row)
     }
 
-    async fn create_entry_types_bulk(&self, inputs: Vec<CreateCustomEntryType>) -> Result<Vec<CustomEntryType>> {
+    async fn create_entry_types_bulk(
+        &self,
+        inputs: Vec<CreateCustomEntryType>,
+    ) -> Result<Vec<CustomEntryType>> {
         let mut tx = self.pool.begin().await?;
         let mut entry_types = Vec::with_capacity(inputs.len());
 
@@ -129,7 +142,11 @@ impl EntryTypeOps for PgDb {
         rows.iter().map(row_to_custom_entry_type).collect()
     }
 
-    async fn update_entry_type(&self, id: &Uuid, input: UpdateCustomEntryType) -> Result<CustomEntryType> {
+    async fn update_entry_type(
+        &self,
+        id: &Uuid,
+        input: UpdateCustomEntryType,
+    ) -> Result<CustomEntryType> {
         // 先验证该类型是否存在
         self.get_entry_type(id).await?;
 
@@ -182,7 +199,10 @@ impl EntryTypeOps for PgDb {
         let custom_type = self.get_entry_type(id).await?;
 
         // 检查是否有 entries 在使用该 type
-        if self.check_entry_type_in_use(&custom_type.project_id, id).await? {
+        if self
+            .check_entry_type_in_use(&custom_type.project_id, id)
+            .await?
+        {
             return Err(WorldflowError::InvalidInput(
                 "Cannot delete entry type that is in use".to_string(),
             ));

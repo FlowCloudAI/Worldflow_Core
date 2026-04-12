@@ -18,10 +18,10 @@ pub struct TagSchema {
     pub description: Option<String>,
 
     /// 标签类型 (number | string | boolean)
-    pub r#type: String,          // "number" | "string" | "boolean"
+    pub r#type: String, // "number" | "string" | "boolean"
 
     /// 标签目标对象
-    pub target: String,          // JSON数组原文，如 ["character", "item"]
+    pub target: String, // JSON数组原文，如 ["character", "item"]
 
     /// 默认值
     pub default_val: Option<String>,

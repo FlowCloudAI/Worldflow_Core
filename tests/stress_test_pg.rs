@@ -1,7 +1,10 @@
-use worldflow_core::{PgDb, models::*, ProjectOps, CategoryOps, EntryOps, TagSchemaOps, EntryRelationOps, EntryTypeOps};
-use worldflow_core::models::EntryFilter;
 use std::{collections::HashMap, time::Instant};
 use uuid::Uuid;
+use worldflow_core::models::EntryFilter;
+use worldflow_core::{
+    CategoryOps, EntryOps, EntryRelationOps, EntryTypeOps, PgDb, ProjectOps, TagSchemaOps,
+    models::*,
+};
 
 async fn setup() -> PgDb {
     let database_url = std::env::var("DATABASE_URL")
@@ -17,37 +20,46 @@ fn random_string(prefix: &str, i: usize) -> String {
 async fn stress_write_and_query_pg() {
     let db = setup().await;
 
-    const N_PROJECTS:   usize = 50;
+    const N_PROJECTS: usize = 50;
     const N_CATEGORIES: usize = 100;
-    const N_SCHEMAS:    usize = 15;
-    const N_ENTRIES:    usize = 500;
-    const N_RELATIONS:  usize = 10; // 每个项目随机建 10 条关系
+    const N_SCHEMAS: usize = 15;
+    const N_ENTRIES: usize = 500;
+    const N_RELATIONS: usize = 10; // 每个项目随机建 10 条关系
 
     let mut project_ids = vec![];
     let t0 = Instant::now();
 
     for pi in 0..N_PROJECTS {
-        let project = db.create_project(CreateProject {
-        cover_image: None,
-            name: random_string("世界观", pi),
-            description: Some(format!("压力测试项目 {pi}")),
-        }).await.unwrap();
+        let project = db
+            .create_project(CreateProject {
+                cover_image: None,
+                name: random_string("世界观", pi),
+                description: Some(format!("压力测试项目 {pi}")),
+            })
+            .await
+            .unwrap();
         project_ids.push(project.id.clone());
 
-        let root_inputs: Vec<CreateCategory> = (0..N_CATEGORIES / 2).map(|ci| CreateCategory {
-            project_id: project.id.clone(),
-            parent_id: None,
-            name: random_string("分类", ci),
-            sort_order: Some(ci as i64),
-        }).collect();
+        let root_inputs: Vec<CreateCategory> = (0..N_CATEGORIES / 2)
+            .map(|ci| CreateCategory {
+                project_id: project.id.clone(),
+                parent_id: None,
+                name: random_string("分类", ci),
+                sort_order: Some(ci as i64),
+            })
+            .collect();
         let roots = db.create_categories_bulk(root_inputs).await.unwrap();
 
-        let child_inputs: Vec<CreateCategory> = roots.iter().enumerate().map(|(ci, root)| CreateCategory {
-            project_id: project.id.clone(),
-            parent_id: Some(root.id),
-            name: random_string("子分类", ci),
-            sort_order: Some(0),
-        }).collect();
+        let child_inputs: Vec<CreateCategory> = roots
+            .iter()
+            .enumerate()
+            .map(|(ci, root)| CreateCategory {
+                project_id: project.id.clone(),
+                parent_id: Some(root.id),
+                name: random_string("子分类", ci),
+                sort_order: Some(0),
+            })
+            .collect();
         let children = db.create_categories_bulk(child_inputs).await.unwrap();
 
         let mut category_ids = Vec::with_capacity(N_CATEGORIES);
@@ -58,18 +70,21 @@ async fn stress_write_and_query_pg() {
             category_ids.push(child.id);
         }
 
-        let schema_inputs: Vec<CreateTagSchema> = (0..N_SCHEMAS).map(|si| CreateTagSchema {
-            project_id: project.id.clone(),
-            name: random_string("属性", si),
-            description: Some(format!("测试属性 {si}")),
-            r#type: if si % 2 == 0 { "number" } else { "string" }.to_string(),
-            target: vec!["character".to_string(), "item".to_string()],
-            default_val: Some("0".to_string()),
-            range_min: Some(0.0),
-            range_max: Some(1000.0),
-            sort_order: Some(si as i64),
-        }).collect();
-        let schema_ids: Vec<Uuid> = db.create_tag_schemas_bulk(schema_inputs)
+        let schema_inputs: Vec<CreateTagSchema> = (0..N_SCHEMAS)
+            .map(|si| CreateTagSchema {
+                project_id: project.id.clone(),
+                name: random_string("属性", si),
+                description: Some(format!("测试属性 {si}")),
+                r#type: if si % 2 == 0 { "number" } else { "string" }.to_string(),
+                target: vec!["character".to_string(), "item".to_string()],
+                default_val: Some("0".to_string()),
+                range_min: Some(0.0),
+                range_max: Some(1000.0),
+                sort_order: Some(si as i64),
+            })
+            .collect();
+        let schema_ids: Vec<Uuid> = db
+            .create_tag_schemas_bulk(schema_inputs)
             .await
             .unwrap()
             .into_iter()
@@ -77,39 +92,54 @@ async fn stress_write_and_query_pg() {
             .collect();
 
         let entry_types = ["character", "location", "item", "event", "concept"];
-        let bulk_inputs: Vec<CreateEntry> = (0..N_ENTRIES).map(|ei| {
-            let tags: Vec<EntryTag> = schema_ids.iter().enumerate().map(|(i, sid)| EntryTag {
-                schema_id: sid.clone(),
-                value: if i % 2 == 0 {
-                    serde_json::json!(ei * 3 % 1000)
-                } else {
-                    serde_json::json!(random_string("值", ei))
-                },
-            }).collect();
+        let bulk_inputs: Vec<CreateEntry> = (0..N_ENTRIES)
+            .map(|ei| {
+                let tags: Vec<EntryTag> = schema_ids
+                    .iter()
+                    .enumerate()
+                    .map(|(i, sid)| EntryTag {
+                        schema_id: sid.clone(),
+                        value: if i % 2 == 0 {
+                            serde_json::json!(ei * 3 % 1000)
+                        } else {
+                            serde_json::json!(random_string("值", ei))
+                        },
+                    })
+                    .collect();
 
-            let fake_images: Vec<FCImage> = (0..3).map(|ii| FCImage {
-                path:     std::path::PathBuf::from(format!(
-                    "C:/Users/test/worldflow/images/entry_{}_img_{}.png",
-                    pi * N_ENTRIES + ei, ii
-                )),
-                is_cover: ii == 0,
-                caption:  if ii == 0 { Some(format!("封面图_{ei}")) } else { None },
-            }).collect();
+                let fake_images: Vec<FCImage> = (0..3)
+                    .map(|ii| FCImage {
+                        path: std::path::PathBuf::from(format!(
+                            "C:/Users/test/worldflow/images/entry_{}_img_{}.png",
+                            pi * N_ENTRIES + ei,
+                            ii
+                        )),
+                        is_cover: ii == 0,
+                        caption: if ii == 0 {
+                            Some(format!("封面图_{ei}"))
+                        } else {
+                            None
+                        },
+                    })
+                    .collect();
 
-            CreateEntry {
-                project_id:  project.id.clone(),
-                category_id: category_ids.get(ei % category_ids.len()).cloned(),
-                title:       random_string("词条", pi * N_ENTRIES + ei),
-                summary:     Some(format!("这是第 {} 个词条的简要说明，属于项目 {}。", ei, pi)),
-                content:     Some(format!(
-                    "# {}\n\n这是第 {} 个词条的内容，属于项目 {}。\n\n详细描述内容在这里。",
-                    random_string("词条", ei), ei, pi,
-                )),
-                r#type: Some(entry_types[ei % entry_types.len()].to_string()),
-                tags:   Some(tags),
-                images: Some(fake_images),
-            }
-        }).collect();
+                CreateEntry {
+                    project_id: project.id.clone(),
+                    category_id: category_ids.get(ei % category_ids.len()).cloned(),
+                    title: random_string("词条", pi * N_ENTRIES + ei),
+                    summary: Some(format!("这是第 {} 个词条的简要说明，属于项目 {}。", ei, pi)),
+                    content: Some(format!(
+                        "# {}\n\n这是第 {} 个词条的内容，属于项目 {}。\n\n详细描述内容在这里。",
+                        random_string("词条", ei),
+                        ei,
+                        pi,
+                    )),
+                    r#type: Some(entry_types[ei % entry_types.len()].to_string()),
+                    tags: Some(tags),
+                    images: Some(fake_images),
+                }
+            })
+            .collect();
         db.create_entries_bulk(bulk_inputs).await.unwrap();
     }
 
@@ -127,21 +157,26 @@ async fn stress_write_and_query_pg() {
     let mut relation_samples: Vec<(Uuid, Uuid)> = vec![]; // (entry_id, relation_id)
 
     for pid in &project_ids {
-        let entries = db.list_entries(pid, EntryFilter::default(), N_ENTRIES, 0).await.unwrap();
+        let entries = db
+            .list_entries(pid, EntryFilter::default(), N_ENTRIES, 0)
+            .await
+            .unwrap();
         let directions = [RelationDirection::OneWay, RelationDirection::TwoWay];
         let mut relation_inputs = Vec::with_capacity(N_RELATIONS);
 
         for ri in 0..N_RELATIONS {
             let a = &entries[ri * 7 % entries.len()];
             let b = &entries[(ri * 13 + 3) % entries.len()];
-            if a.id == b.id { continue; }
+            if a.id == b.id {
+                continue;
+            }
 
             relation_inputs.push(CreateEntryRelation {
                 project_id: pid.clone(),
-                a_id:       a.id.clone(),
-                b_id:       b.id.clone(),
-                relation:   directions[ri % 2].clone(),
-                content:    format!("关系内容_{ri}"),
+                a_id: a.id.clone(),
+                b_id: b.id.clone(),
+                relation: directions[ri % 2].clone(),
+                content: format!("关系内容_{ri}"),
             });
         }
 
@@ -149,7 +184,11 @@ async fn stress_write_and_query_pg() {
             relation_samples.push((relation.a_id, relation.id));
         }
     }
-    println!("关系写入 x{}: {:.2}ms", N_PROJECTS * N_RELATIONS, t_rel_write.elapsed().as_millis());
+    println!(
+        "关系写入 x{}: {:.2}ms",
+        N_PROJECTS * N_RELATIONS,
+        t_rel_write.elapsed().as_millis()
+    );
 
     // ── 普通查询 ──────────────────────────────────────────────
     let t1 = Instant::now();
@@ -166,16 +205,27 @@ async fn stress_write_and_query_pg() {
             assert_eq!(cats.len(), N_CATEGORIES);
         }
     }
-    println!("list_categories x{}: {:.2}ms", 50 * N_PROJECTS, t2.elapsed().as_millis());
+    println!(
+        "list_categories x{}: {:.2}ms",
+        50 * N_PROJECTS,
+        t2.elapsed().as_millis()
+    );
 
     let t3 = Instant::now();
     for _ in 0..20 {
         for pid in &project_ids {
-            let entries = db.list_entries(pid, EntryFilter::default(), N_ENTRIES, 0).await.unwrap();
+            let entries = db
+                .list_entries(pid, EntryFilter::default(), N_ENTRIES, 0)
+                .await
+                .unwrap();
             assert_eq!(entries.len(), N_ENTRIES);
         }
     }
-    println!("list_entries full x{}: {:.2}ms", 20 * N_PROJECTS, t3.elapsed().as_millis());
+    println!(
+        "list_entries full x{}: {:.2}ms",
+        20 * N_PROJECTS,
+        t3.elapsed().as_millis()
+    );
 
     let mut first_cat: HashMap<Uuid, Uuid> = HashMap::new();
     for pid in &project_ids {
@@ -188,33 +238,65 @@ async fn stress_write_and_query_pg() {
     for _ in 0..50 {
         for pid in &project_ids {
             if let Some(cid) = first_cat.get(pid) {
-                let _ = db.list_entries(pid, EntryFilter { category_id: Some(cid), ..Default::default() }, 100, 0).await.unwrap();
+                let _ = db
+                    .list_entries(
+                        pid,
+                        EntryFilter {
+                            category_id: Some(cid),
+                            ..Default::default()
+                        },
+                        100,
+                        0,
+                    )
+                    .await
+                    .unwrap();
             }
         }
     }
-    println!("list_entries by_category x{}: {:.2}ms", 50 * N_PROJECTS, t4.elapsed().as_millis());
+    println!(
+        "list_entries by_category x{}: {:.2}ms",
+        50 * N_PROJECTS,
+        t4.elapsed().as_millis()
+    );
 
     let hit_title = random_string("词条", 42);
     let t5 = Instant::now();
     for _ in 0..50 {
         for pid in &project_ids {
-            let results = db.search_entries(pid, &hit_title, EntryFilter::default(), 50).await.unwrap();
+            let results = db
+                .search_entries(pid, &hit_title, EntryFilter::default(), 50)
+                .await
+                .unwrap();
             assert!(!results.is_empty());
         }
     }
-    println!("search_entries hit x{}: {:.2}ms", 50 * N_PROJECTS, t5.elapsed().as_millis());
+    println!(
+        "search_entries hit x{}: {:.2}ms",
+        50 * N_PROJECTS,
+        t5.elapsed().as_millis()
+    );
 
     let t6 = Instant::now();
     for _ in 0..50 {
         for pid in &project_ids {
-            let results = db.search_entries(pid, "xyznotexist999", EntryFilter::default(), 50).await.unwrap();
+            let results = db
+                .search_entries(pid, "xyznotexist999", EntryFilter::default(), 50)
+                .await
+                .unwrap();
             assert!(results.is_empty());
         }
     }
-    println!("search_entries miss x{}: {:.2}ms", 50 * N_PROJECTS, t6.elapsed().as_millis());
+    println!(
+        "search_entries miss x{}: {:.2}ms",
+        50 * N_PROJECTS,
+        t6.elapsed().as_millis()
+    );
 
     let t7 = Instant::now();
-    let all_entries = db.list_entries(&project_ids[0], EntryFilter::default(), N_ENTRIES, 0).await.unwrap();
+    let all_entries = db
+        .list_entries(&project_ids[0], EntryFilter::default(), N_ENTRIES, 0)
+        .await
+        .unwrap();
     for i in 0..200 {
         let entry = &all_entries[i % all_entries.len()];
         let fetched = db.get_entry(&entry.id).await.unwrap();
@@ -222,7 +304,10 @@ async fn stress_write_and_query_pg() {
     }
     println!("get_entry x200: {:.2}ms", t7.elapsed().as_millis());
 
-    let sample = db.list_entries(&project_ids[0], EntryFilter::default(), 5, 0).await.unwrap();
+    let sample = db
+        .list_entries(&project_ids[0], EntryFilter::default(), 5, 0)
+        .await
+        .unwrap();
     for brief in &sample {
         assert!(brief.cover.is_some(), "封面图应当存在");
     }
@@ -256,10 +341,15 @@ async fn stress_write_and_query_pg() {
     // 关系更新
     let t_rel_update = Instant::now();
     for (_, rel_id) in &relation_samples {
-        db.update_relation(rel_id, UpdateEntryRelation {
-            relation: Some(RelationDirection::TwoWay),
-            content:  Some("更新后的关系内容".to_string()),
-        }).await.unwrap();
+        db.update_relation(
+            rel_id,
+            UpdateEntryRelation {
+                relation: Some(RelationDirection::TwoWay),
+                content: Some("更新后的关系内容".to_string()),
+            },
+        )
+            .await
+            .unwrap();
     }
     println!(
         "update_relation x{}: {:.2}ms",
@@ -272,15 +362,28 @@ async fn stress_write_and_query_pg() {
     for pid in &project_ids {
         db.delete_project(pid).await.unwrap();
     }
-    println!("delete {} projects (cascade): {:.2}ms", N_PROJECTS, t8.elapsed().as_millis());
+    println!(
+        "delete {} projects (cascade): {:.2}ms",
+        N_PROJECTS,
+        t8.elapsed().as_millis()
+    );
 
     for pid in &project_ids {
-        assert!(db.list_entries(pid, EntryFilter::default(), 1, 0).await.unwrap().is_empty());
+        assert!(
+            db.list_entries(pid, EntryFilter::default(), 1, 0)
+                .await
+                .unwrap()
+                .is_empty()
+        );
         assert!(db.list_categories(pid).await.unwrap().is_empty());
         assert!(db.list_relations_for_project(pid).await.unwrap().is_empty());
     }
 
-    println!("\n总写入：{} 词条 across {} 项目", N_PROJECTS * N_ENTRIES, N_PROJECTS);
+    println!(
+        "\n总写入：{} 词条 across {} 项目",
+        N_PROJECTS * N_ENTRIES,
+        N_PROJECTS
+    );
 }
 
 #[tokio::test]
@@ -297,32 +400,42 @@ async fn stress_custom_entry_types_pg() {
     // 创建项目和自定义类型
     let t_create = Instant::now();
     for pi in 0..N_PROJECTS {
-        let project = db.create_project(CreateProject {
-        cover_image: None,
-            name: random_string("类型项目", pi),
-            description: None,
-        }).await.unwrap();
+        let project = db
+            .create_project(CreateProject {
+                cover_image: None,
+                name: random_string("类型项目", pi),
+                description: None,
+            })
+            .await
+            .unwrap();
         project_ids.push(project.id.clone());
 
-        let type_inputs: Vec<CreateCustomEntryType> = (0..CUSTOM_TYPES_PER_PROJECT).map(|ti| CreateCustomEntryType {
-            project_id: project.id.clone(),
-            name: format!("custom_{}_{}", pi, ti),
-            description: Some(format!("自定义类型 {} in project {}", ti, pi)),
-            icon: Some("🎨".to_string()),
-            color: Some(format!("#{:06X}", (pi * 256 + ti * 10) % 0xFFFFFF)),
-        }).collect();
+        let type_inputs: Vec<CreateCustomEntryType> = (0..CUSTOM_TYPES_PER_PROJECT)
+            .map(|ti| CreateCustomEntryType {
+                project_id: project.id.clone(),
+                name: format!("custom_{}_{}", pi, ti),
+                description: Some(format!("自定义类型 {} in project {}", ti, pi)),
+                icon: Some("🎨".to_string()),
+                color: Some(format!("#{:06X}", (pi * 256 + ti * 10) % 0xFFFFFF)),
+            })
+            .collect();
         let custom_types = db.create_entry_types_bulk(type_inputs).await.unwrap();
         type_ids.extend(custom_types.into_iter().map(|custom_type| custom_type.id));
     }
-    println!("(PG) create {} projects with {} custom types each: {:.2}ms",
-        N_PROJECTS, CUSTOM_TYPES_PER_PROJECT, t_create.elapsed().as_millis());
+    println!(
+        "(PG) create {} projects with {} custom types each: {:.2}ms",
+        N_PROJECTS,
+        CUSTOM_TYPES_PER_PROJECT,
+        t_create.elapsed().as_millis()
+    );
 
     // 使用自定义类型创建词条
     let t_entries = Instant::now();
     let mut entry_count = 0;
     for (pi, pid) in project_ids.iter().enumerate() {
         // 获取该项目的类型
-        let project_types: Vec<String> = db.list_custom_entry_types(pid)
+        let project_types: Vec<String> = db
+            .list_custom_entry_types(pid)
             .await
             .unwrap_or_default()
             .iter()
@@ -347,7 +460,11 @@ async fn stress_custom_entry_types_pg() {
         }
         db.create_entries_bulk(bulk_inputs).await.unwrap();
     }
-    println!("(PG) create {} entries with custom types: {:.2}ms", entry_count, t_entries.elapsed().as_millis());
+    println!(
+        "(PG) create {} entries with custom types: {:.2}ms",
+        entry_count,
+        t_entries.elapsed().as_millis()
+    );
 
     // 按自定义类型过滤查询
     let t_filter = Instant::now();
@@ -355,17 +472,27 @@ async fn stress_custom_entry_types_pg() {
     for type_id in type_ids.iter().take(N_PROJECTS * CUSTOM_TYPES_PER_PROJECT) {
         if let Ok(custom_type) = db.get_entry_type(type_id).await {
             let type_id_str = type_id.to_string();
-            let entries = db.list_entries(
-                &custom_type.project_id,
-                EntryFilter { entry_type: Some(type_id_str.as_str()), ..Default::default() },
-                1000,
-                0
-            ).await.unwrap();
+            let entries = db
+                .list_entries(
+                    &custom_type.project_id,
+                    EntryFilter {
+                        entry_type: Some(type_id_str.as_str()),
+                        ..Default::default()
+                    },
+                    1000,
+                    0,
+                )
+                .await
+                .unwrap();
             filtered_count += entries.len();
         }
     }
-    println!("(PG) filter entries by {} custom types: {:.2}ms (found {} entries)",
-        N_PROJECTS * CUSTOM_TYPES_PER_PROJECT, t_filter.elapsed().as_millis(), filtered_count);
+    println!(
+        "(PG) filter entries by {} custom types: {:.2}ms (found {} entries)",
+        N_PROJECTS * CUSTOM_TYPES_PER_PROJECT,
+        t_filter.elapsed().as_millis(),
+        filtered_count
+    );
 
     // 列出所有类型
     let t_list_all = Instant::now();
@@ -374,14 +501,22 @@ async fn stress_custom_entry_types_pg() {
         // 应该有 9 个内置 + CUSTOM_TYPES_PER_PROJECT 个自定义
         assert_eq!(all_types.len(), 9 + CUSTOM_TYPES_PER_PROJECT);
     }
-    println!("(PG) list all types for {} projects: {:.2}ms", N_PROJECTS, t_list_all.elapsed().as_millis());
+    println!(
+        "(PG) list all types for {} projects: {:.2}ms",
+        N_PROJECTS,
+        t_list_all.elapsed().as_millis()
+    );
 
     // 清理
     let t_cleanup = Instant::now();
     for pid in &project_ids {
         db.delete_project(pid).await.unwrap();
     }
-    println!("(PG) cleanup {} projects: {:.2}ms", N_PROJECTS, t_cleanup.elapsed().as_millis());
+    println!(
+        "(PG) cleanup {} projects: {:.2}ms",
+        N_PROJECTS,
+        t_cleanup.elapsed().as_millis()
+    );
 
     println!("\n✅ EntryType 压力测试（PostgreSQL）完成");
 }

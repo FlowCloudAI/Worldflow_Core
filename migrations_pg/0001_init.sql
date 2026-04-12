@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS projects (
-                                        id          TEXT PRIMARY KEY,
+                                        id UUID PRIMARY KEY,
                                         name        TEXT NOT NULL,
                                         description TEXT,
                                         cover_image TEXT,
@@ -8,9 +8,9 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 
 CREATE TABLE IF NOT EXISTS categories (
-                                          id          TEXT PRIMARY KEY,
-                                          project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                                          parent_id   TEXT,
+                                          id         UUID PRIMARY KEY,
+                                          project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+                                          parent_id  UUID,
                                           name        TEXT NOT NULL,
                                           sort_order  INTEGER NOT NULL DEFAULT 0,
                                           created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS categories (
 );
 
 CREATE TABLE IF NOT EXISTS tag_schemas (
-                                           id          TEXT PRIMARY KEY,
-                                           project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                                           id         UUID PRIMARY KEY,
+                                           project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
                                            name        TEXT NOT NULL,
                                            description TEXT,
                                            type        TEXT NOT NULL CHECK(type IN ('number', 'string', 'boolean')),
@@ -37,9 +37,9 @@ CREATE TABLE IF NOT EXISTS tag_schemas (
 );
 
 CREATE TABLE IF NOT EXISTS entries (
-                                       id          TEXT PRIMARY KEY,
-                                       project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                                       category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
+                                       id          UUID PRIMARY KEY,
+                                       project_id  UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+                                       category_id UUID REFERENCES categories (id) ON DELETE SET NULL,
                                        title       TEXT NOT NULL,
                                        summary     TEXT,
                                        content     TEXT NOT NULL DEFAULT '',
@@ -52,10 +52,10 @@ CREATE TABLE IF NOT EXISTS entries (
 );
 
 CREATE TABLE IF NOT EXISTS entry_relations (
-                                               id         TEXT PRIMARY KEY,
-                                               project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                                               a_id       TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
-                                               b_id       TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+                                               id         UUID PRIMARY KEY,
+                                               project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+                                               a_id       UUID NOT NULL REFERENCES entries (id) ON DELETE CASCADE,
+                                               b_id       UUID NOT NULL REFERENCES entries (id) ON DELETE CASCADE,
                                                relation   TEXT NOT NULL CHECK(relation IN ('one_way', 'two_way')),
                                                content    TEXT NOT NULL,
                                                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -70,6 +70,8 @@ CREATE INDEX IF NOT EXISTS idx_entries_fts ON entries
 
 CREATE INDEX IF NOT EXISTS idx_entries_project_id ON entries(project_id);
 CREATE INDEX IF NOT EXISTS idx_entries_category_id ON entries(category_id);
+CREATE INDEX IF NOT EXISTS idx_entries_project_category_updated ON entries (project_id, category_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entries_project_type_updated ON entries (project_id, type, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_categories_project_id ON categories(project_id);
 CREATE INDEX IF NOT EXISTS idx_tag_schemas_project_id ON tag_schemas(project_id);
 CREATE INDEX IF NOT EXISTS idx_entry_relations_a_id ON entry_relations(a_id);
@@ -78,8 +80,8 @@ CREATE INDEX IF NOT EXISTS idx_entry_relations_project ON entry_relations(projec
 
 -- ── entry_types 表（自定义词条类型）──────────────────
 CREATE TABLE IF NOT EXISTS entry_types (
-                                           id          TEXT PRIMARY KEY,
-                                           project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                                           id         UUID PRIMARY KEY,
+                                           project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
                                            name        TEXT NOT NULL,
                                            description TEXT,
                                            icon        TEXT,
@@ -131,7 +133,7 @@ CREATE TRIGGER relations_same_project
 CREATE OR REPLACE FUNCTION normalize_relation_order()
     RETURNS TRIGGER AS $$
 DECLARE
-    tmp TEXT;
+    tmp UUID;
 BEGIN
     IF NEW.relation = 'two_way' AND NEW.a_id > NEW.b_id THEN
         tmp := NEW.a_id;

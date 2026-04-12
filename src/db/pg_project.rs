@@ -1,20 +1,20 @@
-use sqlx::Row;
-use uuid::Uuid;
+use super::traits::ProjectOps;
 use crate::{
     db::PgDb,
     error::{Result, WorldflowError},
     models::{CreateProject, Project, UpdateProject},
 };
-use super::traits::ProjectOps;
+use sqlx::Row;
+use uuid::Uuid;
 
 fn row_to_project(row: &sqlx::postgres::PgRow) -> Result<Project> {
     Ok(Project {
-        id:          row.try_get("id")?,
-        name:        row.try_get("name")?,
+        id: row.try_get("id")?,
+        name: row.try_get("name")?,
         description: row.try_get("description")?,
         cover_image: row.try_get("cover_image")?,
-        created_at:  row.try_get("created_at")?,
-        updated_at:  row.try_get("updated_at")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
     })
 }
 
@@ -24,7 +24,7 @@ impl ProjectOps for PgDb {
         let row = sqlx::query(
             "INSERT INTO projects (id, name, description, cover_image)
              VALUES ($1, $2, $3, $4)
-             RETURNING id, name, description, cover_image, created_at::TEXT, updated_at::TEXT"
+             RETURNING id, name, description, cover_image, created_at::TEXT, updated_at::TEXT",
         )
             .bind(&id)
             .bind(&input.name)
@@ -38,7 +38,7 @@ impl ProjectOps for PgDb {
     async fn get_project(&self, id: &Uuid) -> Result<Project> {
         let row = sqlx::query(
             "SELECT id, name, description, cover_image, created_at::TEXT, updated_at::TEXT
-             FROM projects WHERE id = $1"
+             FROM projects WHERE id = $1",
         )
             .bind(id)
             .fetch_optional(&self.pool)
@@ -50,7 +50,7 @@ impl ProjectOps for PgDb {
     async fn list_projects(&self) -> Result<Vec<Project>> {
         let rows = sqlx::query(
             "SELECT id, name, description, cover_image, created_at::TEXT, updated_at::TEXT
-             FROM projects ORDER BY created_at DESC"
+             FROM projects ORDER BY created_at DESC",
         )
             .fetch_all(&self.pool)
             .await?;
@@ -65,7 +65,7 @@ impl ProjectOps for PgDb {
                  description = COALESCE($2, description),
                  cover_image = CASE WHEN $3 THEN $4 ELSE cover_image END
              WHERE id = $5
-             RETURNING id, name, description, cover_image, created_at::TEXT, updated_at::TEXT"
+             RETURNING id, name, description, cover_image, created_at::TEXT, updated_at::TEXT",
         )
             .bind(&input.name)
             .bind(&input.description)

@@ -1,43 +1,43 @@
-use std::path::PathBuf;
+use super::traits::EntryOps;
 use crate::{
     db::PgDb,
     error::{Result, WorldflowError},
     models::{CreateEntry, Entry, EntryBrief, EntryFilter, UpdateEntry},
 };
 use sqlx::Row;
+use std::path::PathBuf;
 use uuid::Uuid;
-use super::traits::EntryOps;
 
 fn row_to_entry(row: &sqlx::postgres::PgRow) -> Result<Entry> {
-    let tags_str: String   = row.try_get("tags")?;
+    let tags_str: String = row.try_get("tags")?;
     let images_str: String = row.try_get("images")?;
     Ok(Entry {
-        id:          row.try_get("id")?,
-        project_id:  row.try_get("project_id")?,
+        id: row.try_get("id")?,
+        project_id: row.try_get("project_id")?,
         category_id: row.try_get("category_id")?,
-        title:       row.try_get("title")?,
-        summary:     row.try_get("summary")?,
-        content:     row.try_get("content")?,
-        r#type:      row.try_get("type")?,
-        tags:        sqlx::types::Json(serde_json::from_str(&tags_str)?),
-        images:      sqlx::types::Json(serde_json::from_str(&images_str)?),
-        cover_path:  row.try_get("cover_path")?,
-        created_at:  row.try_get("created_at")?,
-        updated_at:  row.try_get("updated_at")?,
+        title: row.try_get("title")?,
+        summary: row.try_get("summary")?,
+        content: row.try_get("content")?,
+        r#type: row.try_get("type")?,
+        tags: sqlx::types::Json(serde_json::from_str(&tags_str)?),
+        images: sqlx::types::Json(serde_json::from_str(&images_str)?),
+        cover_path: row.try_get("cover_path")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
     })
 }
 
 fn row_to_entry_brief(row: &sqlx::postgres::PgRow) -> Result<EntryBrief> {
     let cover_str: Option<String> = row.try_get("cover_path")?;
     Ok(EntryBrief {
-        id:          row.try_get("id")?,
-        project_id:  row.try_get("project_id")?,
+        id: row.try_get("id")?,
+        project_id: row.try_get("project_id")?,
         category_id: row.try_get("category_id")?,
-        title:       row.try_get("title")?,
-        summary:     row.try_get("summary")?,
-        r#type:      row.try_get("type")?,
-        cover:       cover_str.map(PathBuf::from),
-        updated_at:  row.try_get("updated_at")?,
+        title: row.try_get("title")?,
+        summary: row.try_get("summary")?,
+        r#type: row.try_get("type")?,
+        cover: cover_str.map(PathBuf::from),
+        updated_at: row.try_get("updated_at")?,
     })
 }
 
@@ -45,22 +45,33 @@ impl EntryOps for PgDb {
     async fn count_entries(&self, project_id: &Uuid, filter: EntryFilter<'_>) -> Result<i64> {
         let mut p = 2usize;
         let mut sql = "SELECT COUNT(*) as cnt FROM entries WHERE project_id = $1".to_string();
-        if filter.category_id.is_some() { sql.push_str(&format!(" AND category_id = ${p}")); p += 1; }
-        if filter.entry_type.is_some()  { sql.push_str(&format!(" AND type = ${p}")); }
+        if filter.category_id.is_some() {
+            sql.push_str(&format!(" AND category_id = ${p}"));
+            p += 1;
+        }
+        if filter.entry_type.is_some() {
+            sql.push_str(&format!(" AND type = ${p}"));
+        }
 
         let mut q = sqlx::query(&sql).bind(project_id);
-        if let Some(cid) = filter.category_id { q = q.bind(cid); }
-        if let Some(t)   = filter.entry_type  { q = q.bind(t); }
+        if let Some(cid) = filter.category_id {
+            q = q.bind(cid);
+        }
+        if let Some(t) = filter.entry_type {
+            q = q.bind(t);
+        }
 
         let row = q.fetch_one(&self.pool).await?;
         Ok(row.try_get("cnt")?)
     }
 
     async fn create_entry(&self, input: CreateEntry) -> Result<Entry> {
-        let id     = Uuid::now_v7();
-        let tags   = serde_json::to_string(&input.tags.unwrap_or_default())?;
+        let id = Uuid::now_v7();
+        let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
         let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;
-        let cover_path = input.images.as_ref()
+        let cover_path = input
+            .images
+            .as_ref()
             .and_then(|imgs| imgs.iter().find(|i| i.is_cover))
             .map(|i| i.path.to_string_lossy().to_string());
 
@@ -106,16 +117,35 @@ impl EntryOps for PgDb {
         offset: usize,
     ) -> Result<Vec<EntryBrief>> {
         let mut p = 2usize;
-        let mut sql = "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at::TEXT
-                       FROM entries WHERE project_id = $1".to_string();
-        if filter.category_id.is_some() { sql.push_str(&format!(" AND category_id = ${p}")); p += 1; }
-        if filter.entry_type.is_some()  { sql.push_str(&format!(" AND type = ${p}")); p += 1; }
-        sql.push_str(&format!(" ORDER BY updated_at DESC LIMIT ${p} OFFSET ${}", p + 1));
+        let mut sql =
+            "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at::TEXT
+                       FROM entries WHERE project_id = $1"
+                .to_string();
+        if filter.category_id.is_some() {
+            sql.push_str(&format!(" AND category_id = ${p}"));
+            p += 1;
+        }
+        if filter.entry_type.is_some() {
+            sql.push_str(&format!(" AND type = ${p}"));
+            p += 1;
+        }
+        sql.push_str(&format!(
+            " ORDER BY updated_at DESC LIMIT ${p} OFFSET ${}",
+            p + 1
+        ));
 
         let mut q = sqlx::query(&sql).bind(project_id);
-        if let Some(cid) = filter.category_id { q = q.bind(cid); }
-        if let Some(t)   = filter.entry_type  { q = q.bind(t); }
-        let rows = q.bind(limit as i64).bind(offset as i64).fetch_all(&self.pool).await?;
+        if let Some(cid) = filter.category_id {
+            q = q.bind(cid);
+        }
+        if let Some(t) = filter.entry_type {
+            q = q.bind(t);
+        }
+        let rows = q
+            .bind(limit as i64)
+            .bind(offset as i64)
+            .fetch_all(&self.pool)
+            .await?;
 
         rows.iter().map(row_to_entry_brief).collect()
     }
@@ -127,19 +157,39 @@ impl EntryOps for PgDb {
         filter: EntryFilter<'_>,
         limit: usize,
     ) -> Result<Vec<EntryBrief>> {
-        let mut p = 3usize;
+        // $3 = fts_limit：内层子查询先限制候选集，防止高频词命中爆炸后排序代价过高
+        let fts_limit = (limit * 20).max(500).min(2000) as i64;
+        let mut p = 4usize;
         let mut sql = "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at::TEXT
-                       FROM entries
-                       WHERE project_id = $1
-                         AND to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(content,''))
-                             @@ plainto_tsquery('simple', $2)".to_string();
-        if filter.category_id.is_some() { sql.push_str(&format!(" AND category_id = ${p}")); p += 1; }
-        if filter.entry_type.is_some()  { sql.push_str(&format!(" AND type = ${p}")); p += 1; }
+                       FROM (
+                         SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
+                         FROM entries
+                         WHERE project_id = $1
+                           AND to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(content,''))
+                               @@ plainto_tsquery('simple', $2)
+                         LIMIT $3
+                       ) _fts
+                       WHERE true".to_string();
+        if filter.category_id.is_some() {
+            sql.push_str(&format!(" AND category_id = ${p}"));
+            p += 1;
+        }
+        if filter.entry_type.is_some() {
+            sql.push_str(&format!(" AND type = ${p}"));
+            p += 1;
+        }
         sql.push_str(&format!(" ORDER BY updated_at DESC LIMIT ${p}"));
 
-        let mut q = sqlx::query(&sql).bind(project_id).bind(query);
-        if let Some(cid) = filter.category_id { q = q.bind(cid); }
-        if let Some(t)   = filter.entry_type  { q = q.bind(t); }
+        let mut q = sqlx::query(&sql)
+            .bind(project_id)
+            .bind(query)
+            .bind(fts_limit);
+        if let Some(cid) = filter.category_id {
+            q = q.bind(cid);
+        }
+        if let Some(t) = filter.entry_type {
+            q = q.bind(t);
+        }
         let rows = q.bind(limit as i64).fetch_all(&self.pool).await?;
 
         rows.iter().map(row_to_entry_brief).collect()
@@ -208,10 +258,12 @@ impl EntryOps for PgDb {
         let mut count = 0;
 
         for input in inputs {
-            let id     = Uuid::now_v7();
-            let tags   = serde_json::to_string(&input.tags.unwrap_or_default())?;
+            let id = Uuid::now_v7();
+            let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
             let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;
-            let cover_path = input.images.as_ref()
+            let cover_path = input
+                .images
+                .as_ref()
                 .and_then(|imgs| imgs.iter().find(|i| i.is_cover))
                 .map(|i| i.path.to_string_lossy().to_string());
 

@@ -1,20 +1,20 @@
-use sqlx::Row;
-use uuid::Uuid;
+use super::traits::ProjectOps;
 use crate::{
     db::SqliteDb,
     error::{Result, WorldflowError},
     models::{CreateProject, Project, UpdateProject},
 };
-use super::traits::ProjectOps;
+use sqlx::Row;
+use uuid::Uuid;
 
 fn row_to_project(row: &sqlx::sqlite::SqliteRow) -> Result<Project> {
     Ok(Project {
-        id:          row.try_get("id")?,
-        name:        row.try_get("name")?,
+        id: row.try_get("id")?,
+        name: row.try_get("name")?,
         description: row.try_get("description")?,
         cover_image: row.try_get("cover_image")?,
-        created_at:  row.try_get("created_at")?,
-        updated_at:  row.try_get("updated_at")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
     })
 }
 
@@ -24,7 +24,7 @@ impl ProjectOps for SqliteDb {
         let row = sqlx::query(
             "INSERT INTO projects (id, name, description, cover_image)
              VALUES (?, ?, ?, ?)
-             RETURNING id, name, description, cover_image, created_at, updated_at"
+             RETURNING id, name, description, cover_image, created_at, updated_at",
         )
             .bind(&id)
             .bind(&input.name)
@@ -38,7 +38,7 @@ impl ProjectOps for SqliteDb {
     async fn get_project(&self, id: &Uuid) -> Result<Project> {
         let row = sqlx::query(
             "SELECT id, name, description, cover_image, created_at, updated_at
-             FROM projects WHERE id = ?"
+             FROM projects WHERE id = ?",
         )
             .bind(id)
             .fetch_optional(&self.pool)
@@ -50,7 +50,7 @@ impl ProjectOps for SqliteDb {
     async fn list_projects(&self) -> Result<Vec<Project>> {
         let rows = sqlx::query(
             "SELECT id, name, description, cover_image, created_at, updated_at
-             FROM projects ORDER BY created_at DESC"
+             FROM projects ORDER BY created_at DESC",
         )
             .fetch_all(&self.pool)
             .await?;
@@ -65,7 +65,7 @@ impl ProjectOps for SqliteDb {
                  description = COALESCE(?, description),
                  cover_image = CASE WHEN ? THEN ? ELSE cover_image END
              WHERE id = ?
-             RETURNING id, name, description, cover_image, created_at, updated_at"
+             RETURNING id, name, description, cover_image, created_at, updated_at",
         )
             .bind(&input.name)
             .bind(&input.description)

@@ -1,26 +1,24 @@
-use sqlx::Row;
-use uuid::Uuid;
+use super::traits::EntryRelationOps;
 use crate::{
     db::SqliteDb,
     error::{Result, WorldflowError},
     models::{CreateEntryRelation, EntryRelation, RelationDirection, UpdateEntryRelation},
 };
-use super::traits::EntryRelationOps;
+use sqlx::Row;
+use uuid::Uuid;
 
 fn row_to_relation(row: &sqlx::sqlite::SqliteRow) -> Result<EntryRelation> {
     let relation_str: String = row.try_get("relation")?;
     let relation = RelationDirection::from_str(&relation_str)
-        .ok_or_else(|| WorldflowError::InvalidInput(
-            format!("未知的关系类型: {relation_str}")
-        ))?;
+        .ok_or_else(|| WorldflowError::InvalidInput(format!("未知的关系类型: {relation_str}")))?;
 
     Ok(EntryRelation {
-        id:         row.try_get("id")?,
+        id: row.try_get("id")?,
         project_id: row.try_get("project_id")?,
-        a_id:       row.try_get("a_id")?,
-        b_id:       row.try_get("b_id")?,
+        a_id: row.try_get("a_id")?,
+        b_id: row.try_get("b_id")?,
         relation,
-        content:    row.try_get("content")?,
+        content: row.try_get("content")?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
     })
@@ -31,7 +29,8 @@ impl EntryRelationOps for SqliteDb {
         let id = Uuid::now_v7();
 
         // two_way 关系规范化：强制 a_id < b_id，消除重复
-        let (a_id, b_id) = if input.relation == RelationDirection::TwoWay && input.a_id > input.b_id {
+        let (a_id, b_id) = if input.relation == RelationDirection::TwoWay && input.a_id > input.b_id
+        {
             (&input.b_id, &input.a_id)
         } else {
             (&input.a_id, &input.b_id)
@@ -40,7 +39,7 @@ impl EntryRelationOps for SqliteDb {
         let row = sqlx::query(
             "INSERT INTO entry_relations (id, project_id, a_id, b_id, relation, content)
              VALUES (?, ?, ?, ?, ?, ?)
-             RETURNING id, project_id, a_id, b_id, relation, content, created_at, updated_at"
+             RETURNING id, project_id, a_id, b_id, relation, content, created_at, updated_at",
         )
             .bind(&id)
             .bind(&input.project_id)
@@ -54,22 +53,26 @@ impl EntryRelationOps for SqliteDb {
         row_to_relation(&row)
     }
 
-    async fn create_relations_bulk(&self, inputs: Vec<CreateEntryRelation>) -> Result<Vec<EntryRelation>> {
+    async fn create_relations_bulk(
+        &self,
+        inputs: Vec<CreateEntryRelation>,
+    ) -> Result<Vec<EntryRelation>> {
         let mut tx = self.pool.begin().await?;
         let mut relations = Vec::with_capacity(inputs.len());
 
         for input in inputs {
             let id = Uuid::now_v7();
-            let (a_id, b_id) = if input.relation == RelationDirection::TwoWay && input.a_id > input.b_id {
-                (input.b_id, input.a_id)
-            } else {
-                (input.a_id, input.b_id)
-            };
+            let (a_id, b_id) =
+                if input.relation == RelationDirection::TwoWay && input.a_id > input.b_id {
+                    (input.b_id, input.a_id)
+                } else {
+                    (input.a_id, input.b_id)
+                };
 
             let row = sqlx::query(
                 "INSERT INTO entry_relations (id, project_id, a_id, b_id, relation, content)
                  VALUES (?, ?, ?, ?, ?, ?)
-                 RETURNING id, project_id, a_id, b_id, relation, content, created_at, updated_at"
+                 RETURNING id, project_id, a_id, b_id, relation, content, created_at, updated_at",
             )
                 .bind(id)
                 .bind(input.project_id)
@@ -89,7 +92,7 @@ impl EntryRelationOps for SqliteDb {
     async fn get_relation(&self, id: &Uuid) -> Result<EntryRelation> {
         let row = sqlx::query(
             "SELECT id, project_id, a_id, b_id, relation, content, created_at, updated_at
-             FROM entry_relations WHERE id = ?"
+             FROM entry_relations WHERE id = ?",
         )
             .bind(id)
             .fetch_optional(&self.pool)
@@ -99,16 +102,13 @@ impl EntryRelationOps for SqliteDb {
         row_to_relation(&row)
     }
 
-    async fn list_relations_for_entry(
-        &self,
-        entry_id: &Uuid,
-    ) -> Result<Vec<EntryRelation>> {
+    async fn list_relations_for_entry(&self, entry_id: &Uuid) -> Result<Vec<EntryRelation>> {
         let rows = sqlx::query(
             "SELECT id, project_id, a_id, b_id, relation, content, created_at, updated_at
              FROM entry_relations
              WHERE a_id = ?
                 OR (b_id = ? AND relation = 'two_way')
-             ORDER BY created_at "
+             ORDER BY created_at ",
         )
             .bind(entry_id)
             .bind(entry_id)
@@ -118,15 +118,12 @@ impl EntryRelationOps for SqliteDb {
         rows.iter().map(row_to_relation).collect()
     }
 
-    async fn list_relations_for_project(
-        &self,
-        project_id: &Uuid,
-    ) -> Result<Vec<EntryRelation>> {
+    async fn list_relations_for_project(&self, project_id: &Uuid) -> Result<Vec<EntryRelation>> {
         let rows = sqlx::query(
             "SELECT id, project_id, a_id, b_id, relation, content, created_at, updated_at
              FROM entry_relations
              WHERE project_id = ?
-             ORDER BY created_at "
+             ORDER BY created_at ",
         )
             .bind(project_id)
             .fetch_all(&self.pool)
@@ -144,7 +141,8 @@ impl EntryRelationOps for SqliteDb {
 
         // 如果变更为 two_way，需要规范化 a_id < b_id
         let new_relation = input.relation.as_ref().unwrap_or(&existing.relation);
-        let needs_swap = *new_relation == RelationDirection::TwoWay && existing.a_id > existing.b_id;
+        let needs_swap =
+            *new_relation == RelationDirection::TwoWay && existing.a_id > existing.b_id;
 
         let sql = if needs_swap {
             "UPDATE entry_relations
@@ -183,15 +181,11 @@ impl EntryRelationOps for SqliteDb {
         Ok(())
     }
 
-    async fn delete_relations_between(
-        &self,
-        entry_a: &Uuid,
-        entry_b: &Uuid,
-    ) -> Result<u64> {
+    async fn delete_relations_between(&self, entry_a: &Uuid, entry_b: &Uuid) -> Result<u64> {
         let result = sqlx::query(
             "DELETE FROM entry_relations
              WHERE (a_id = ? AND b_id = ?)
-                OR (a_id = ? AND b_id = ?)"
+                OR (a_id = ? AND b_id = ?)",
         )
             .bind(entry_a)
             .bind(entry_b)

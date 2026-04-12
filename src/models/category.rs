@@ -37,7 +37,7 @@ pub struct CreateCategory {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateCategory {
-    pub parent_id: Option<Option<Uuid>>,  // None = 不更新, Some(None) = 移到根节点
+    pub parent_id: Option<Option<Uuid>>, // None = 不更新, Some(None) = 移到根节点
     pub name: Option<String>,
     pub sort_order: Option<i64>,
 }

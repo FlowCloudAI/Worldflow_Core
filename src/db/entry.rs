@@ -1,65 +1,75 @@
-use std::path::PathBuf;
+use super::traits::EntryOps;
 use crate::{
     db::SqliteDb,
     error::{Result, WorldflowError},
     models::{CreateEntry, Entry, EntryBrief, EntryFilter, UpdateEntry},
 };
 use sqlx::Row;
+use std::path::PathBuf;
 use uuid::Uuid;
-use super::traits::EntryOps;
 
 fn row_to_entry(row: &sqlx::sqlite::SqliteRow) -> Result<Entry> {
-    let tags_str: String   = row.try_get("tags")?;
+    let tags_str: String = row.try_get("tags")?;
     let images_str: String = row.try_get("images")?;
     Ok(Entry {
-        id:          row.try_get("id")?,
-        project_id:  row.try_get("project_id")?,
+        id: row.try_get("id")?,
+        project_id: row.try_get("project_id")?,
         category_id: row.try_get("category_id")?,
-        title:       row.try_get("title")?,
-        summary:     row.try_get("summary")?,
-        content:     row.try_get("content")?,
-        r#type:      row.try_get("type")?,
-        tags:        sqlx::types::Json(serde_json::from_str(&tags_str)?),
-        images:      sqlx::types::Json(serde_json::from_str(&images_str)?),
-        cover_path:  row.try_get("cover_path")?,
-        created_at:  row.try_get("created_at")?,
-        updated_at:  row.try_get("updated_at")?,
+        title: row.try_get("title")?,
+        summary: row.try_get("summary")?,
+        content: row.try_get("content")?,
+        r#type: row.try_get("type")?,
+        tags: sqlx::types::Json(serde_json::from_str(&tags_str)?),
+        images: sqlx::types::Json(serde_json::from_str(&images_str)?),
+        cover_path: row.try_get("cover_path")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
     })
 }
 
 fn row_to_entry_brief(row: &sqlx::sqlite::SqliteRow) -> Result<EntryBrief> {
     let cover_str: Option<String> = row.try_get("cover_path")?;
     Ok(EntryBrief {
-        id:          row.try_get("id")?,
-        project_id:  row.try_get("project_id")?,
+        id: row.try_get("id")?,
+        project_id: row.try_get("project_id")?,
         category_id: row.try_get("category_id")?,
-        title:       row.try_get("title")?,
-        summary:     row.try_get("summary")?,
-        r#type:      row.try_get("type")?,
-        cover:       cover_str.map(PathBuf::from),
-        updated_at:  row.try_get("updated_at")?,
+        title: row.try_get("title")?,
+        summary: row.try_get("summary")?,
+        r#type: row.try_get("type")?,
+        cover: cover_str.map(PathBuf::from),
+        updated_at: row.try_get("updated_at")?,
     })
 }
 
 impl EntryOps for SqliteDb {
     async fn count_entries(&self, project_id: &Uuid, filter: EntryFilter<'_>) -> Result<i64> {
         let mut sql = "SELECT COUNT(*) as cnt FROM entries WHERE project_id = ?".to_string();
-        if filter.category_id.is_some() { sql.push_str(" AND category_id = ?"); }
-        if filter.entry_type.is_some()  { sql.push_str(" AND type = ?"); }
+        if filter.category_id.is_some() {
+            sql.push_str(" AND category_id = ?");
+        }
+        if filter.entry_type.is_some() {
+            sql.push_str(" AND type = ?");
+        }
 
         let mut q = sqlx::query(&sql).bind(project_id);
-        if let Some(cid) = filter.category_id { q = q.bind(cid); }
-        if let Some(t)   = filter.entry_type  { q = q.bind(t); }
+        if let Some(cid) = filter.category_id {
+            q = q.bind(cid);
+        }
+        if let Some(t) = filter.entry_type {
+            q = q.bind(t);
+        }
 
         let row = q.fetch_one(&self.pool).await?;
         Ok(row.try_get("cnt")?)
     }
 
     async fn create_entry(&self, input: CreateEntry) -> Result<Entry> {
-        let id     = Uuid::now_v7();
-        let tags   = serde_json::to_string(&input.tags.unwrap_or_default())?;
+        let id = Uuid::now_v7();
+        let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
         let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;
-        let cover_path = input.images.as_ref()
+        let cover_path = input
+            .images
+            .as_ref()
             .and_then(|imgs| imgs.iter().find(|i| i.is_cover))
             .map(|i| i.path.to_string_lossy().to_string());
 
@@ -104,16 +114,30 @@ impl EntryOps for SqliteDb {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<EntryBrief>> {
-        let mut sql = "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
-                       FROM entries WHERE project_id = ?".to_string();
-        if filter.category_id.is_some() { sql.push_str(" AND category_id = ?"); }
-        if filter.entry_type.is_some()  { sql.push_str(" AND type = ?"); }
+        let mut sql =
+            "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
+                       FROM entries WHERE project_id = ?"
+                .to_string();
+        if filter.category_id.is_some() {
+            sql.push_str(" AND category_id = ?");
+        }
+        if filter.entry_type.is_some() {
+            sql.push_str(" AND type = ?");
+        }
         sql.push_str(" ORDER BY updated_at DESC LIMIT ? OFFSET ?");
 
         let mut q = sqlx::query(&sql).bind(project_id);
-        if let Some(cid) = filter.category_id { q = q.bind(cid); }
-        if let Some(t)   = filter.entry_type  { q = q.bind(t); }
-        let rows = q.bind(limit as i64).bind(offset as i64).fetch_all(&self.pool).await?;
+        if let Some(cid) = filter.category_id {
+            q = q.bind(cid);
+        }
+        if let Some(t) = filter.entry_type {
+            q = q.bind(t);
+        }
+        let rows = q
+            .bind(limit as i64)
+            .bind(offset as i64)
+            .fetch_all(&self.pool)
+            .await?;
 
         rows.iter().map(row_to_entry_brief).collect()
     }
@@ -125,17 +149,32 @@ impl EntryOps for SqliteDb {
         filter: EntryFilter<'_>,
         limit: usize,
     ) -> Result<Vec<EntryBrief>> {
+        // FTS 子查询只做 MATCH + LIMIT，LIMIT 才能真正在扫描阶段提前截断候选集。
+        // project_id 过滤留在外层 WHERE，走主表 B-tree 索引。
+        // 4 倍于最终结果数，上限 500，兼顾 sparse（不过度扫描）和 dense（不爆炸）。
+        let fts_limit = ((limit as i64) * 4).min(500);
         let mut sql = "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
                        FROM entries
                        WHERE project_id = ?
-                         AND rowid IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)".to_string();
-        if filter.category_id.is_some() { sql.push_str(" AND category_id = ?"); }
-        if filter.entry_type.is_some()  { sql.push_str(" AND type = ?"); }
+                         AND rowid IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ? LIMIT ?)".to_string();
+        if filter.category_id.is_some() {
+            sql.push_str(" AND category_id = ?");
+        }
+        if filter.entry_type.is_some() {
+            sql.push_str(" AND type = ?");
+        }
         sql.push_str(" ORDER BY updated_at DESC LIMIT ?");
 
-        let mut q = sqlx::query(&sql).bind(project_id).bind(query);
-        if let Some(cid) = filter.category_id { q = q.bind(cid); }
-        if let Some(t)   = filter.entry_type  { q = q.bind(t); }
+        let mut q = sqlx::query(&sql)
+            .bind(project_id)
+            .bind(query)
+            .bind(fts_limit);
+        if let Some(cid) = filter.category_id {
+            q = q.bind(cid);
+        }
+        if let Some(t) = filter.entry_type {
+            q = q.bind(t);
+        }
         let rows = q.bind(limit as i64).fetch_all(&self.pool).await?;
 
         rows.iter().map(row_to_entry_brief).collect()
@@ -205,10 +244,12 @@ impl EntryOps for SqliteDb {
         let mut count = 0;
 
         for input in inputs {
-            let id     = Uuid::now_v7();
-            let tags   = serde_json::to_string(&input.tags.unwrap_or_default())?;
+            let id = Uuid::now_v7();
+            let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
             let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;
-            let cover_path = input.images.as_ref()
+            let cover_path = input
+                .images
+                .as_ref()
                 .and_then(|imgs| imgs.iter().find(|i| i.is_cover))
                 .map(|i| i.path.to_string_lossy().to_string());
 

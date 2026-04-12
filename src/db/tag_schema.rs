@@ -1,26 +1,26 @@
-use sqlx::Row;
-use uuid::Uuid;
+use super::traits::TagSchemaOps;
 use crate::{
     db::SqliteDb,
     error::{Result, WorldflowError},
     models::{CreateTagSchema, TagSchema},
 };
-use super::traits::TagSchemaOps;
+use sqlx::Row;
+use uuid::Uuid;
 
 fn row_to_tag_schema(row: &sqlx::sqlite::SqliteRow) -> Result<TagSchema> {
     Ok(TagSchema {
-        id:          row.try_get("id")?,
-        project_id:  row.try_get("project_id")?,
-        name:        row.try_get("name")?,
+        id: row.try_get("id")?,
+        project_id: row.try_get("project_id")?,
+        name: row.try_get("name")?,
         description: row.try_get("description")?,
-        r#type:      row.try_get("type")?,
-        target:      row.try_get("target")?,
+        r#type: row.try_get("type")?,
+        target: row.try_get("target")?,
         default_val: row.try_get("default_val")?,
-        range_min:   row.try_get("range_min")?,
-        range_max:   row.try_get("range_max")?,
-        sort_order:  row.try_get("sort_order")?,
-        created_at:  row.try_get("created_at")?,
-        updated_at:  row.try_get("updated_at")?,
+        range_min: row.try_get("range_min")?,
+        range_max: row.try_get("range_max")?,
+        sort_order: row.try_get("sort_order")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
     })
 }
 
@@ -28,14 +28,16 @@ impl TagSchemaOps for SqliteDb {
     async fn create_tag_schema(&self, input: CreateTagSchema) -> Result<TagSchema> {
         if let Some(ref val) = input.default_val {
             if input.r#type == "number" && val.parse::<f64>().is_err() {
-                return Err(WorldflowError::InvalidInput(
-                    format!("default_val '{}' 不是合法数字", val)
-                ));
+                return Err(WorldflowError::InvalidInput(format!(
+                    "default_val '{}' 不是合法数字",
+                    val
+                )));
             }
             if input.r#type == "boolean" && val != "true" && val != "false" {
-                return Err(WorldflowError::InvalidInput(
-                    format!("default_val '{}' 不是合法布尔值", val)
-                ));
+                return Err(WorldflowError::InvalidInput(format!(
+                    "default_val '{}' 不是合法布尔值",
+                    val
+                )));
             }
         }
 
@@ -66,21 +68,26 @@ impl TagSchemaOps for SqliteDb {
         row_to_tag_schema(&row)
     }
 
-    async fn create_tag_schemas_bulk(&self, inputs: Vec<CreateTagSchema>) -> Result<Vec<TagSchema>> {
+    async fn create_tag_schemas_bulk(
+        &self,
+        inputs: Vec<CreateTagSchema>,
+    ) -> Result<Vec<TagSchema>> {
         let mut tx = self.pool.begin().await?;
         let mut schemas = Vec::with_capacity(inputs.len());
 
         for input in inputs {
             if let Some(ref val) = input.default_val {
                 if input.r#type == "number" && val.parse::<f64>().is_err() {
-                    return Err(WorldflowError::InvalidInput(
-                        format!("default_val '{}' 不是合法数字", val)
-                    ));
+                    return Err(WorldflowError::InvalidInput(format!(
+                        "default_val '{}' 不是合法数字",
+                        val
+                    )));
                 }
                 if input.r#type == "boolean" && val != "true" && val != "false" {
-                    return Err(WorldflowError::InvalidInput(
-                        format!("default_val '{}' 不是合法布尔值", val)
-                    ));
+                    return Err(WorldflowError::InvalidInput(format!(
+                        "default_val '{}' 不是合法布尔值",
+                        val
+                    )));
                 }
             }
 
@@ -118,7 +125,7 @@ impl TagSchemaOps for SqliteDb {
         let row = sqlx::query(
             "SELECT id, project_id, name, description, type, target,
                     default_val, range_min, range_max, sort_order, created_at, updated_at
-             FROM tag_schemas WHERE id = ?"
+             FROM tag_schemas WHERE id = ?",
         )
             .bind(id)
             .fetch_optional(&self.pool)
@@ -134,7 +141,7 @@ impl TagSchemaOps for SqliteDb {
                     default_val, range_min, range_max, sort_order, created_at, updated_at
              FROM tag_schemas
              WHERE project_id = ?
-             ORDER BY sort_order , name "
+             ORDER BY sort_order , name ",
         )
             .bind(project_id)
             .fetch_all(&self.pool)
@@ -159,7 +166,7 @@ impl TagSchemaOps for SqliteDb {
                  sort_order  = COALESCE(?, sort_order)
              WHERE id = ?
              RETURNING id, project_id, name, description, type, target,
-                       default_val, range_min, range_max, sort_order, created_at, updated_at"
+                       default_val, range_min, range_max, sort_order, created_at, updated_at",
         )
             .bind(&input.name)
             .bind(&input.description)

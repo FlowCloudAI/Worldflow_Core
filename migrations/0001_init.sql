@@ -3,7 +3,7 @@ PRAGMA foreign_keys = ON;
 PRAGMA recursive_triggers = OFF;
 
 CREATE TABLE IF NOT EXISTS projects (
-                                        id          TEXT PRIMARY KEY,
+                                        id BLOB PRIMARY KEY CHECK (length(id) = 16),
                                         name        TEXT NOT NULL,
                                         description TEXT,
                                         cover_image TEXT,
@@ -12,9 +12,9 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 
 CREATE TABLE IF NOT EXISTS categories (
-                                          id          TEXT PRIMARY KEY,
-                                          project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                                          parent_id   TEXT,
+                                          id         BLOB PRIMARY KEY CHECK (length(id) = 16),
+                                          project_id BLOB NOT NULL REFERENCES projects (id) ON DELETE CASCADE CHECK (length(project_id) = 16),
+                                          parent_id  BLOB CHECK (parent_id IS NULL OR length(parent_id) = 16),
                                           name        TEXT NOT NULL,
                                           sort_order  INTEGER NOT NULL DEFAULT 0,
                                           created_at  TEXT NOT NULL DEFAULT (datetime('now')),
@@ -25,8 +25,8 @@ CREATE TABLE IF NOT EXISTS categories (
 );
 
 CREATE TABLE IF NOT EXISTS tag_schemas (
-                                           id          TEXT PRIMARY KEY,
-                                           project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                                           id         BLOB PRIMARY KEY CHECK (length(id) = 16),
+                                           project_id BLOB NOT NULL REFERENCES projects (id) ON DELETE CASCADE CHECK (length(project_id) = 16),
                                            name        TEXT NOT NULL,
                                            description TEXT,
                                            type        TEXT NOT NULL CHECK(type IN ('number', 'string', 'boolean')),
@@ -41,9 +41,9 @@ CREATE TABLE IF NOT EXISTS tag_schemas (
 );
 
 CREATE TABLE IF NOT EXISTS entries (
-                                       id          TEXT PRIMARY KEY,
-                                       project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                                       category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
+                                       id          BLOB PRIMARY KEY CHECK (length(id) = 16),
+                                       project_id  BLOB NOT NULL REFERENCES projects (id) ON DELETE CASCADE CHECK (length(project_id) = 16),
+                                       category_id BLOB REFERENCES categories (id) ON DELETE SET NULL CHECK (category_id IS NULL OR length(category_id) = 16),
                                        title       TEXT NOT NULL,
                                        summary     TEXT,
                                        content     TEXT NOT NULL DEFAULT '',
@@ -56,10 +56,10 @@ CREATE TABLE IF NOT EXISTS entries (
 );
 
 CREATE TABLE IF NOT EXISTS entry_relations (
-                                               id         TEXT PRIMARY KEY,
-                                               project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                                               a_id       TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
-                                               b_id       TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+                                               id         BLOB PRIMARY KEY CHECK (length(id) = 16),
+                                               project_id BLOB NOT NULL REFERENCES projects (id) ON DELETE CASCADE CHECK (length(project_id) = 16),
+                                               a_id       BLOB NOT NULL REFERENCES entries (id) ON DELETE CASCADE CHECK (length(a_id) = 16),
+                                               b_id       BLOB NOT NULL REFERENCES entries (id) ON DELETE CASCADE CHECK (length(b_id) = 16),
                                                relation   TEXT NOT NULL CHECK(relation IN ('one_way', 'two_way')),
                                                content    TEXT NOT NULL,
                                                created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -146,6 +146,8 @@ CREATE INDEX IF NOT EXISTS idx_entries_project         ON entries(project_id);
 CREATE INDEX IF NOT EXISTS idx_entries_category        ON entries(category_id);
 CREATE INDEX IF NOT EXISTS idx_entries_type            ON entries(type);
 CREATE INDEX IF NOT EXISTS idx_entries_project_updated ON entries(project_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entries_project_category_updated ON entries (project_id, category_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entries_project_type_updated ON entries (project_id, type, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_categories_project      ON categories(project_id);
 CREATE INDEX IF NOT EXISTS idx_categories_parent       ON categories(parent_id);
 CREATE INDEX IF NOT EXISTS idx_tag_schemas_project     ON tag_schemas(project_id);
@@ -154,36 +156,35 @@ CREATE INDEX IF NOT EXISTS idx_relations_b             ON entry_relations(b_id);
 CREATE INDEX IF NOT EXISTS idx_relations_project       ON entry_relations(project_id);
 
 -- FTS5 全文搜索
+-- 不使用 content=entries，让 project_id UNINDEXED 直接存储在 FTS5 内部，
+-- 避免高频词命中时大量回表读取 project_id 导致的随机 I/O 爆炸。
+-- rowid 由触发器写入时显式对齐 entries.rowid，外层仍可用 rowid IN (...) 关联。
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
-                                                             project_id UNINDEXED,
                                                              title,
                                                              content,
-                                                             content=entries,
-                                                             content_rowid=rowid,
+                                                             project_id UNINDEXED,
                                                              tokenize='trigram'
 );
 
 CREATE TRIGGER IF NOT EXISTS entries_fts_insert AFTER INSERT ON entries BEGIN
-    INSERT INTO entries_fts(rowid, project_id, title, content)
-    VALUES (new.rowid, new.project_id, new.title, new.content);
+    INSERT INTO entries_fts(rowid, title, content, project_id)
+    VALUES (new.rowid, new.title, new.content, new.project_id);
 END;
 
 CREATE TRIGGER IF NOT EXISTS entries_fts_update AFTER UPDATE ON entries BEGIN
-    INSERT INTO entries_fts(entries_fts, rowid, project_id, title, content)
-    VALUES ('delete', old.rowid, old.project_id, old.title, old.content);
-    INSERT INTO entries_fts(rowid, project_id, title, content)
-    VALUES (new.rowid, new.project_id, new.title, new.content);
+    DELETE FROM entries_fts WHERE rowid = old.rowid;
+    INSERT INTO entries_fts(rowid, title, content, project_id)
+    VALUES (new.rowid, new.title, new.content, new.project_id);
 END;
 
 CREATE TRIGGER IF NOT EXISTS entries_fts_delete AFTER DELETE ON entries BEGIN
-    INSERT INTO entries_fts(entries_fts, rowid, project_id, title, content)
-    VALUES ('delete', old.rowid, old.project_id, old.title, old.content);
+    DELETE FROM entries_fts WHERE rowid = old.rowid;
 END;
 
 -- ── entry_types 表（自定义词条类型）──────────────────
 CREATE TABLE IF NOT EXISTS entry_types (
-    id          TEXT PRIMARY KEY,
-    project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                                           id         BLOB PRIMARY KEY CHECK (length(id) = 16),
+                                           project_id BLOB NOT NULL REFERENCES projects (id) ON DELETE CASCADE CHECK (length(project_id) = 16),
     name        TEXT NOT NULL,
     description TEXT,
     icon        TEXT,

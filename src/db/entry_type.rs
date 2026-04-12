@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::{
     db::SqliteDb,
     error::{Result, WorldflowError},
-    models::{CustomEntryType, CreateCustomEntryType, UpdateCustomEntryType, EntryTypeView},
+    models::{CreateCustomEntryType, CustomEntryType, EntryTypeView, UpdateCustomEntryType},
 };
 
 use super::traits::EntryTypeOps;
@@ -44,7 +44,10 @@ impl EntryTypeOps for SqliteDb {
         row_to_custom_entry_type(&row)
     }
 
-    async fn create_entry_types_bulk(&self, inputs: Vec<CreateCustomEntryType>) -> Result<Vec<CustomEntryType>> {
+    async fn create_entry_types_bulk(
+        &self,
+        inputs: Vec<CreateCustomEntryType>,
+    ) -> Result<Vec<CustomEntryType>> {
         let mut tx = self.pool.begin().await?;
         let mut entry_types = Vec::with_capacity(inputs.len());
 
@@ -127,7 +130,11 @@ impl EntryTypeOps for SqliteDb {
         rows.iter().map(row_to_custom_entry_type).collect()
     }
 
-    async fn update_entry_type(&self, id: &Uuid, input: UpdateCustomEntryType) -> Result<CustomEntryType> {
+    async fn update_entry_type(
+        &self,
+        id: &Uuid,
+        input: UpdateCustomEntryType,
+    ) -> Result<CustomEntryType> {
         // 先验证该类型是否存在
         self.get_entry_type(id).await?;
 
@@ -159,7 +166,10 @@ impl EntryTypeOps for SqliteDb {
         let custom_type = self.get_entry_type(id).await?;
 
         // 检查是否有 entries 在使用该 type
-        if self.check_entry_type_in_use(&custom_type.project_id, id).await? {
+        if self
+            .check_entry_type_in_use(&custom_type.project_id, id)
+            .await?
+        {
             return Err(WorldflowError::InvalidInput(
                 "Cannot delete entry type that is in use".to_string(),
             ));

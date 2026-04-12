@@ -1,18 +1,18 @@
-use sqlx::Row;
-use uuid::Uuid;
+use super::traits::CategoryOps;
 use crate::{
     db::PgDb,
     error::{Result, WorldflowError},
     models::{Category, CreateCategory, UpdateCategory},
 };
-use super::traits::CategoryOps;
+use sqlx::Row;
+use uuid::Uuid;
 
 fn row_to_category(row: &sqlx::postgres::PgRow) -> Result<Category> {
     Ok(Category {
-        id:         row.try_get("id")?,
+        id: row.try_get("id")?,
         project_id: row.try_get("project_id")?,
-        parent_id:  row.try_get("parent_id")?,
-        name:       row.try_get("name")?,
+        parent_id: row.try_get("parent_id")?,
+        name: row.try_get("name")?,
         sort_order: row.try_get("sort_order")?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
@@ -28,7 +28,7 @@ impl CategoryOps for PgDb {
              SELECT c.id FROM categories c
              JOIN descendants d ON c.parent_id = d.id
          )
-         SELECT COUNT(*) as cnt FROM descendants WHERE id = $2"
+         SELECT COUNT(*) as cnt FROM descendants WHERE id = $2",
         )
             .bind(id)
             .bind(new_parent_id)
@@ -85,7 +85,7 @@ impl CategoryOps for PgDb {
     async fn get_category(&self, id: &Uuid) -> Result<Category> {
         let row = sqlx::query(
             "SELECT id, project_id, parent_id, name, sort_order, created_at::TEXT, updated_at::TEXT
-             FROM categories WHERE id = $1"
+             FROM categories WHERE id = $1",
         )
             .bind(id)
             .fetch_optional(&self.pool)
@@ -99,7 +99,7 @@ impl CategoryOps for PgDb {
             "SELECT id, project_id, parent_id, name, sort_order, created_at::TEXT, updated_at::TEXT
              FROM categories
              WHERE project_id = $1
-             ORDER BY parent_id NULLS FIRST, sort_order, name"
+             ORDER BY parent_id NULLS FIRST, sort_order, name",
         )
             .bind(project_id)
             .fetch_all(&self.pool)
@@ -111,7 +111,7 @@ impl CategoryOps for PgDb {
         if let Some(Some(ref new_parent)) = input.parent_id {
             if self.would_create_cycle(id, new_parent).await? {
                 return Err(WorldflowError::InvalidInput(
-                    "不能将分类移动到自己的子孙节点下".to_string()
+                    "不能将分类移动到自己的子孙节点下".to_string(),
                 ));
             }
         }

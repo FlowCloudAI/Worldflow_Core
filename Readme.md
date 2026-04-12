@@ -2,12 +2,13 @@
 
 `worldflow_core` 是一个 Rust 库，负责世界观/设定数据的核心存储层。
 
-它当前提供 6 组能力：
+它当前提供 7 组能力：
 
 - `Project`: 顶层项目容器
 - `Category`: 树状分类
 - `Entry`: 词条内容
 - `TagSchema`: 标签定义
+- `EntryLink`: 基于稳定 id 的词条内部链接
 - `EntryRelation`: 词条关系
 - `EntryType`: 9 个内置类型 + 项目级自定义类型
 
@@ -61,14 +62,15 @@
 
 ## 当前能力总览
 
-| 模块 | 核心结构 | 说明 |
-|---|---|---|
-| Project | `Project` / `CreateProject` / `UpdateProject` | 项目顶层容器，带可选封面 |
-| Category | `Category` / `CreateCategory` / `UpdateCategory` | 树状分类，支持循环检测 |
-| Entry | `Entry` / `EntryBrief` / `CreateEntry` / `UpdateEntry` | 核心词条内容，带标签、图片、类型 |
-| TagSchema | `TagSchema` / `CreateTagSchema` | 标签定义；更新接口也复用 `CreateTagSchema` |
-| EntryRelation | `EntryRelation` / `CreateEntryRelation` / `UpdateEntryRelation` | 词条关系，支持单向/双向 |
-| EntryType | `BuiltinEntryType` / `CustomEntryType` / `EntryTypeView` | 9 个内置类型 + 项目级自定义类型 |
+| 模块            | 核心结构                                                            | 说明                                         |
+|---------------|-----------------------------------------------------------------|--------------------------------------------|
+| Project       | `Project` / `CreateProject` / `UpdateProject`                   | 项目顶层容器，带可选封面                               |
+| Category      | `Category` / `CreateCategory` / `UpdateCategory`                | 树状分类，支持循环检测                                |
+| Entry         | `Entry` / `EntryBrief` / `CreateEntry` / `UpdateEntry`          | 核心词条内容，带标签、图片、类型                           |
+| TagSchema     | `TagSchema` / `CreateTagSchema`                                 | 标签定义；更新接口也复用 `CreateTagSchema`             |
+| EntryLink     | `EntryLink` / `CreateEntryLink`                                 | 词条内部链接，语义为 `a_id -> b_id`，用于正向链接、反向链接、实时同步 |
+| EntryRelation | `EntryRelation` / `CreateEntryRelation` / `UpdateEntryRelation` | 词条关系，支持单向/双向                               |
+| EntryType     | `BuiltinEntryType` / `CustomEntryType` / `EntryTypeView`        | 9 个内置类型 + 项目级自定义类型                         |
 
 后端能力差异：
 
@@ -92,8 +94,10 @@ worldflow_core/
 ├── Cargo.toml
 ├── migrations/
 │   └── 0001_init.sql
+│   └── 0002_entry_links.sql
 ├── migrations_pg/
 │   └── 0001_init.sql
+│   └── 0002_entry_links.sql
 ├── src/
 │   ├── lib.rs
 │   ├── error.rs
@@ -102,6 +106,7 @@ worldflow_core/
 │   │   ├── project.rs
 │   │   ├── category.rs
 │   │   ├── entry.rs
+│   │   ├── entry_link.rs
 │   │   ├── tag_schema.rs
 │   │   ├── entry_relation.rs
 │   │   └── entry_type.rs
@@ -113,12 +118,14 @@ worldflow_core/
 │       ├── project.rs
 │       ├── category.rs
 │       ├── entry.rs
+│       ├── entry_link.rs
 │       ├── tag_schema.rs
 │       ├── entry_relation.rs
 │       ├── entry_type.rs
 │       ├── pg_project.rs
 │       ├── pg_category.rs
 │       ├── pg_entry.rs
+│       ├── pg_entry_link.rs
 │       ├── pg_tag_schema.rs
 │       ├── pg_entry_relation.rs
 │       └── pg_entry_type.rs
@@ -365,6 +372,7 @@ pub struct EntryFilter<'a> {
 
 - categories
 - entries
+- entry_links
 - tag_schemas
 - entry_relations
 - entry_types
@@ -514,6 +522,9 @@ SQLite 与 PostgreSQL 都有这些主干索引：
 - relations by `a_id`
 - relations by `b_id`
 - relations by `project_id`
+- entry_links by `a_id`
+- entry_links by `b_id`
+- entry_links by `project_id`
 - entry_types by `project_id`
 
 ---
@@ -523,10 +534,12 @@ SQLite 与 PostgreSQL 都有这些主干索引：
 SQLite 迁移文件：
 
 - [migrations/0001_init.sql](migrations/0001_init.sql)
+- [migrations/0002_entry_links.sql](migrations/0002_entry_links.sql)
 
 PostgreSQL 迁移文件：
 
 - [migrations_pg/0001_init.sql](migrations_pg/0001_init.sql)
+- [migrations_pg/0002_entry_links.sql](migrations_pg/0002_entry_links.sql)
 
 当前迁移已经包含：
 
@@ -534,6 +547,7 @@ PostgreSQL 迁移文件：
 - 触发器
 - 索引
 - FTS/tsvector 相关结构
+- `entry_links` 表
 - `entry_types` 表
 
 你不需要手动先跑 `sqlx migrate run` 才能使用库，只要调用 `SqliteDb::new()` 或 `PgDb::new()`，库会自动执行迁移。
@@ -564,6 +578,32 @@ PostgreSQL 迁移文件：
 5. 在 [src/db/mod.rs](src/db/mod.rs) 注册模块
 6. 写迁移
 7. 更新 README
+
+---
+
+## 词条内部链接改造说明
+
+当前库同时保留两套能力：
+
+- 旧正文内容仍可继续保存基于标题的内部链接写法，库层不会主动改写历史正文
+- 新增 `entry_links` 表，用稳定 `id` 维护结构化内部链接，语义固定为 `a_id -> b_id`
+
+推荐的上层用法：
+
+1. 保存词条正文时，继续保留原始内容，避免一次性破坏旧数据
+2. 同步解析正文中的内部链接，并把最新出链写入 `entry_links`
+3. 读取正向链接时按 `a_id` 查 `entry_links`
+4. 读取反向链接时按 `b_id` 查 `entry_links`
+5. 老正文里仍然只有标题链接的内容，可继续由上层按标题做兜底解析
+
+当前 `EntryLinkOps` 提供的核心接口：
+
+- `list_outgoing_links(entry_id)`
+- `list_incoming_links(entry_id)`
+- `delete_links_from_entry(entry_id)`
+- `replace_outgoing_links(project_id, entry_id, linked_entry_ids)`
+
+`replace_outgoing_links` 会先删旧出链，再批量写入当前词条的最新出链，并自动过滤重复目标和自链接。
 
 ### 改搜索
 
