@@ -41,6 +41,13 @@ fn row_to_entry_brief(row: &sqlx::sqlite::SqliteRow) -> Result<EntryBrief> {
     })
 }
 
+fn escape_like_pattern(input: &str) -> String {
+    input
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 impl EntryOps for SqliteDb {
     async fn count_entries(&self, project_id: &Uuid, filter: EntryFilter<'_>) -> Result<i64> {
         let mut sql = "SELECT COUNT(*) as cnt FROM entries WHERE project_id = ?".to_string();
@@ -149,6 +156,45 @@ impl EntryOps for SqliteDb {
         filter: EntryFilter<'_>,
         limit: usize,
     ) -> Result<Vec<EntryBrief>> {
+        let query = query.trim();
+        let query_char_len = query.chars().count();
+
+        if query_char_len < 3 {
+            let like_query = format!("%{}%", escape_like_pattern(query));
+            let mut sql =
+                "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
+                           FROM entries
+                           WHERE project_id = ?
+                             AND (
+                                 title LIKE ? ESCAPE '\\'
+                                 OR COALESCE(summary, '') LIKE ? ESCAPE '\\'
+                                 OR COALESCE(content, '') LIKE ? ESCAPE '\\'
+                             )"
+                .to_string();
+            if filter.category_id.is_some() {
+                sql.push_str(" AND category_id = ?");
+            }
+            if filter.entry_type.is_some() {
+                sql.push_str(" AND type = ?");
+            }
+            sql.push_str(" ORDER BY updated_at DESC LIMIT ?");
+
+            let mut q = sqlx::query(&sql)
+                .bind(project_id)
+                .bind(&like_query)
+                .bind(&like_query)
+                .bind(&like_query);
+            if let Some(cid) = filter.category_id {
+                q = q.bind(cid);
+            }
+            if let Some(t) = filter.entry_type {
+                q = q.bind(t);
+            }
+            let rows = q.bind(limit as i64).fetch_all(&self.pool).await?;
+
+            return rows.iter().map(row_to_entry_brief).collect();
+        }
+
         // FTS 子查询只做 MATCH + LIMIT，LIMIT 才能真正在扫描阶段提前截断候选集。
         // project_id 过滤留在外层 WHERE，走主表 B-tree 索引。
         // 4 倍于最终结果数，上限 500，兼顾 sparse（不过度扫描）和 dense（不爆炸）。
