@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs, time::Instant};
 
 use uuid::Uuid;
-use worldflow_core::{
+pub use worldflow_core::{
     CategoryOps, EntryLinkOps, EntryOps, EntryRelationOps, EntryTypeOps, ProjectOps, SqliteDb,
     TagSchemaOps, models::*,
 };
@@ -484,8 +484,8 @@ async fn bench_sqlite_relation_paths() {
                 content: Some("更新后的关系内容".to_string()),
             },
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
     }
     println!(
         "[sqlite/relation] update_relation x{}: {}ms",

@@ -41,18 +41,19 @@ CREATE TABLE IF NOT EXISTS tag_schemas (
 );
 
 CREATE TABLE IF NOT EXISTS entries (
-                                       id          BLOB PRIMARY KEY CHECK (length(id) = 16),
-                                       project_id  BLOB NOT NULL REFERENCES projects (id) ON DELETE CASCADE CHECK (length(project_id) = 16),
-                                       category_id BLOB REFERENCES categories (id) ON DELETE SET NULL CHECK (category_id IS NULL OR length(category_id) = 16),
-                                       title       TEXT NOT NULL,
+                                       _rowid      INTEGER PRIMARY KEY AUTOINCREMENT,
+                                       id          BLOB UNIQUE NOT NULL CHECK (length(id) = 16),
+                                       project_id  BLOB        NOT NULL REFERENCES projects (id) ON DELETE CASCADE CHECK (length(project_id) = 16),
+                                       category_id BLOB        REFERENCES categories (id) ON DELETE SET NULL CHECK (category_id IS NULL OR length(category_id) = 16),
+                                       title       TEXT        NOT NULL,
                                        summary     TEXT,
-                                       content     TEXT NOT NULL DEFAULT '',
+                                       content     TEXT        NOT NULL DEFAULT '',
                                        type        TEXT,
-                                       tags        TEXT NOT NULL DEFAULT '[]',
-                                       images      TEXT NOT NULL DEFAULT '[]',
+                                       tags        TEXT        NOT NULL DEFAULT '[]',
+                                       images      TEXT        NOT NULL DEFAULT '[]',
                                        cover_path  TEXT,
-                                       created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-                                       updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+                                       created_at  TEXT        NOT NULL DEFAULT (datetime('now')),
+                                       updated_at  TEXT        NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS entry_relations (
@@ -135,7 +136,9 @@ BEGIN UPDATE tag_schemas SET updated_at = datetime('now') WHERE id = NEW.id; END
 
 CREATE TRIGGER IF NOT EXISTS entries_updated_at
     AFTER UPDATE ON entries
-BEGIN UPDATE entries SET updated_at = datetime('now') WHERE id = NEW.id; END;
+BEGIN
+    UPDATE entries SET updated_at = datetime('now') WHERE _rowid = NEW._rowid;
+END;
 
 CREATE TRIGGER IF NOT EXISTS entry_relations_updated_at
     AFTER UPDATE ON entry_relations
@@ -158,7 +161,8 @@ CREATE INDEX IF NOT EXISTS idx_relations_project       ON entry_relations(projec
 -- FTS5 全文搜索
 -- 不使用 content=entries，让 project_id UNINDEXED 直接存储在 FTS5 内部，
 -- 避免高频词命中时大量回表读取 project_id 导致的随机 I/O 爆炸。
--- rowid 由触发器写入时显式对齐 entries.rowid，外层仍可用 rowid IN (...) 关联。
+-- entries 表使用 INTEGER PRIMARY KEY (_rowid) 作为稳定 rowid，FTS5 通过触发器同步 _rowid，
+-- 解决了 UUID 主键下隐式 rowid 不稳定导致的 FTS5 关联失效问题。
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
                                                              title,
                                                              content,
@@ -168,17 +172,17 @@ CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
 
 CREATE TRIGGER IF NOT EXISTS entries_fts_insert AFTER INSERT ON entries BEGIN
     INSERT INTO entries_fts(rowid, title, content, project_id)
-    VALUES (new.rowid, new.title, new.content, new.project_id);
+    VALUES (new._rowid, new.title, new.content, new.project_id);
 END;
 
 CREATE TRIGGER IF NOT EXISTS entries_fts_update AFTER UPDATE ON entries BEGIN
-    DELETE FROM entries_fts WHERE rowid = old.rowid;
+    DELETE FROM entries_fts WHERE rowid = old._rowid;
     INSERT INTO entries_fts(rowid, title, content, project_id)
-    VALUES (new.rowid, new.title, new.content, new.project_id);
+    VALUES (new._rowid, new.title, new.content, new.project_id);
 END;
 
 CREATE TRIGGER IF NOT EXISTS entries_fts_delete AFTER DELETE ON entries BEGIN
-    DELETE FROM entries_fts WHERE rowid = old.rowid;
+    DELETE FROM entries_fts WHERE rowid = old._rowid;
 END;
 
 -- ── entry_types 表（自定义词条类型）──────────────────
