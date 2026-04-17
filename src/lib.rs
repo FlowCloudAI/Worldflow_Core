@@ -5,8 +5,8 @@ pub mod error;
 pub mod models;
 
 pub use db::traits::{
-    CategoryOps, Db, EntryLinkOps, EntryOps, EntryRelationOps, EntryTypeOps, ProjectOps,
-    TagSchemaOps,
+    CategoryOps, Db, EntryLinkOps, EntryOps, EntryRelationOps, EntryTypeOps, IdeaNoteOps,
+    ProjectOps, TagSchemaOps,
 };
 pub use error::{Result, WorldflowError};
 

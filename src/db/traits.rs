@@ -46,7 +46,7 @@ pub trait EntryOps: Send + Sync {
 pub trait TagSchemaOps: Send + Sync {
     async fn create_tag_schema(&self, input: CreateTagSchema) -> Result<TagSchema>;
     async fn create_tag_schemas_bulk(&self, inputs: Vec<CreateTagSchema>)
-                                     -> Result<Vec<TagSchema>>;
+    -> Result<Vec<TagSchema>>;
     async fn get_tag_schema(&self, id: &Uuid) -> Result<TagSchema>;
     async fn list_tag_schemas(&self, project_id: &Uuid) -> Result<Vec<TagSchema>>;
     async fn update_tag_schema(&self, id: &Uuid, input: CreateTagSchema) -> Result<TagSchema>;
@@ -63,7 +63,7 @@ pub trait EntryRelationOps: Send + Sync {
     async fn list_relations_for_entry(&self, entry_id: &Uuid) -> Result<Vec<EntryRelation>>;
     async fn list_relations_for_project(&self, project_id: &Uuid) -> Result<Vec<EntryRelation>>;
     async fn update_relation(&self, id: &Uuid, input: UpdateEntryRelation)
-                             -> Result<EntryRelation>;
+    -> Result<EntryRelation>;
     async fn delete_relation(&self, id: &Uuid) -> Result<()>;
     async fn delete_relations_between(&self, entry_a: &Uuid, entry_b: &Uuid) -> Result<u64>;
 }
@@ -112,17 +112,40 @@ pub trait EntryTypeOps: Send + Sync {
     async fn check_entry_type_in_use(&self, project_id: &Uuid, type_id: &Uuid) -> Result<bool>;
 }
 
+pub trait IdeaNoteOps: Send + Sync {
+    async fn create_idea_note(&self, input: CreateIdeaNote) -> Result<IdeaNote>;
+    async fn get_idea_note(&self, id: &Uuid) -> Result<IdeaNote>;
+    async fn list_idea_notes(
+        &self,
+        filter: IdeaNoteFilter<'_>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<IdeaNote>>;
+    async fn update_idea_note(&self, id: &Uuid, input: UpdateIdeaNote) -> Result<IdeaNote>;
+    async fn delete_idea_note(&self, id: &Uuid) -> Result<()>;
+}
+
 /// 组合 trait，实现所有子 trait 即自动实现 Db
 pub trait Db:
-ProjectOps + CategoryOps + EntryOps + TagSchemaOps + EntryRelationOps + EntryLinkOps + EntryTypeOps
-{}
-impl<
-    T: ProjectOps
+    ProjectOps
     + CategoryOps
     + EntryOps
     + TagSchemaOps
     + EntryRelationOps
     + EntryLinkOps
-    + EntryTypeOps,
+    + EntryTypeOps
+    + IdeaNoteOps
+{
+}
+impl<
+    T: ProjectOps
+        + CategoryOps
+        + EntryOps
+        + TagSchemaOps
+        + EntryRelationOps
+        + EntryLinkOps
+        + EntryTypeOps
+        + IdeaNoteOps,
 > Db for T
-{}
+{
+}

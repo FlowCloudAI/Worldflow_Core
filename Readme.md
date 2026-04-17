@@ -2,7 +2,7 @@
 
 `worldflow_core` 是一个 Rust 库，负责世界观/设定数据的核心存储层。
 
-它当前提供 7 组能力：
+它当前提供 8 组能力：
 
 - `Project`: 顶层项目容器
 - `Category`: 树状分类
@@ -11,6 +11,7 @@
 - `EntryLink`: 基于稳定 id 的词条内部链接
 - `EntryRelation`: 词条关系
 - `EntryType`: 9 个内置类型 + 项目级自定义类型
+- `IdeaNote`: 灵感便签，Entry 的前置态，独立建模
 
 默认后端是 SQLite，可选启用 PostgreSQL。
 
@@ -71,6 +72,7 @@
 | EntryLink     | `EntryLink` / `CreateEntryLink`                                 | 词条内部链接，语义为 `a_id -> b_id`，用于正向链接、反向链接、实时同步 |
 | EntryRelation | `EntryRelation` / `CreateEntryRelation` / `UpdateEntryRelation` | 词条关系，支持单向/双向                               |
 | EntryType     | `BuiltinEntryType` / `CustomEntryType` / `EntryTypeView`        | 9 个内置类型 + 项目级自定义类型                         |
+| IdeaNote      | `IdeaNote` / `CreateIdeaNote` / `UpdateIdeaNote`                | 灵感便签，快速记录突发灵感，Entry 的前置态，独立建模              |
 
 后端能力差异：
 
@@ -95,9 +97,11 @@ worldflow_core/
 ├── migrations/
 │   └── 0001_init.sql
 │   └── 0002_entry_links.sql
+│   └── 0003_idea_notes.sql
 ├── migrations_pg/
 │   └── 0001_init.sql
 │   └── 0002_entry_links.sql
+│   └── 0003_idea_notes.sql
 ├── src/
 │   ├── lib.rs
 │   ├── error.rs
@@ -109,7 +113,8 @@ worldflow_core/
 │   │   ├── entry_link.rs
 │   │   ├── tag_schema.rs
 │   │   ├── entry_relation.rs
-│   │   └── entry_type.rs
+│   │   ├── entry_type.rs
+│   │   └── idea_note.rs
 │   └── db/
 │       ├── mod.rs
 │       ├── traits.rs
@@ -128,7 +133,9 @@ worldflow_core/
 │       ├── pg_entry_link.rs
 │       ├── pg_tag_schema.rs
 │       ├── pg_entry_relation.rs
-│       └── pg_entry_type.rs
+│       ├── pg_entry_type.rs
+│       ├── idea_note.rs
+│       └── pg_idea_note.rs
 └── tests/
     ├── db.rs
     ├── stress_test.rs
