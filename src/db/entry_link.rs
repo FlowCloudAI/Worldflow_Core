@@ -37,14 +37,16 @@ impl EntryLinkOps for SqliteDb {
              VALUES (?, ?, ?, ?)
              RETURNING id, project_id, a_id, b_id",
         )
-            .bind(id)
-            .bind(input.project_id)
-            .bind(input.a_id)
-            .bind(input.b_id)
-            .fetch_one(&self.pool)
-            .await?;
+        .bind(id)
+        .bind(input.project_id)
+        .bind(input.a_id)
+        .bind(input.b_id)
+        .fetch_one(&self.pool)
+        .await?;
 
-        row_to_link(&row)
+        let result = row_to_link(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn list_outgoing_links(&self, entry_id: &Uuid) -> Result<Vec<EntryLink>> {
@@ -54,9 +56,9 @@ impl EntryLinkOps for SqliteDb {
              WHERE a_id = ?
              ORDER BY rowid",
         )
-            .bind(entry_id)
-            .fetch_all(&self.pool)
-            .await?;
+        .bind(entry_id)
+        .fetch_all(&self.pool)
+        .await?;
 
         rows.iter().map(row_to_link).collect()
     }
@@ -68,9 +70,9 @@ impl EntryLinkOps for SqliteDb {
              WHERE b_id = ?
              ORDER BY rowid",
         )
-            .bind(entry_id)
-            .fetch_all(&self.pool)
-            .await?;
+        .bind(entry_id)
+        .fetch_all(&self.pool)
+        .await?;
 
         rows.iter().map(row_to_link).collect()
     }
@@ -81,7 +83,9 @@ impl EntryLinkOps for SqliteDb {
             .execute(&self.pool)
             .await?;
 
-        Ok(result.rows_affected())
+        let affected = result.rows_affected();
+        self.trigger_snapshot();
+        Ok(affected)
     }
 
     async fn replace_outgoing_links(
@@ -105,16 +109,17 @@ impl EntryLinkOps for SqliteDb {
                  VALUES (?, ?, ?, ?)
                  RETURNING id, project_id, a_id, b_id",
             )
-                .bind(Uuid::now_v7())
-                .bind(project_id)
-                .bind(entry_id)
-                .bind(linked_id)
-                .fetch_one(&mut *tx)
-                .await?;
+            .bind(Uuid::now_v7())
+            .bind(project_id)
+            .bind(entry_id)
+            .bind(linked_id)
+            .fetch_one(&mut *tx)
+            .await?;
             links.push(row_to_link(&row)?);
         }
 
         tx.commit().await?;
+        self.trigger_snapshot();
         Ok(links)
     }
 }

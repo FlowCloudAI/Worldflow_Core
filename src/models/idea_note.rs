@@ -75,6 +75,8 @@ pub struct CreateIdeaNote {
 /// 更新灵感便签（所有字段可选，None 表示不更新）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UpdateIdeaNote {
+    /// None = 不更新；Some(None) = 清空（变为全局便签）；Some(Some(id)) = 归属到指定项目
+    pub project_id: Option<Option<Uuid>>,
     /// None = 不更新；Some(None) = 清空标题；Some(Some(s)) = 更新为新值
     pub title: Option<Option<String>>,
     pub content: Option<String>,

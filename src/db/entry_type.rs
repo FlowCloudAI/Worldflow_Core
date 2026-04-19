@@ -41,7 +41,9 @@ impl EntryTypeOps for SqliteDb {
         .fetch_one(&self.pool)
         .await?;
 
-        row_to_custom_entry_type(&row)
+        let result = row_to_custom_entry_type(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn create_entry_types_bulk(
@@ -58,18 +60,19 @@ impl EntryTypeOps for SqliteDb {
                  VALUES (?, ?, ?, ?, ?, ?)
                  RETURNING id, project_id, name, description, icon, color, created_at, updated_at",
             )
-                .bind(id)
-                .bind(input.project_id)
-                .bind(input.name)
-                .bind(input.description)
-                .bind(input.icon)
-                .bind(input.color)
-                .fetch_one(&mut *tx)
-                .await?;
+            .bind(id)
+            .bind(input.project_id)
+            .bind(input.name)
+            .bind(input.description)
+            .bind(input.icon)
+            .bind(input.color)
+            .fetch_one(&mut *tx)
+            .await?;
             entry_types.push(row_to_custom_entry_type(&row)?);
         }
 
         tx.commit().await?;
+        self.trigger_snapshot();
         Ok(entry_types)
     }
 
@@ -158,7 +161,9 @@ impl EntryTypeOps for SqliteDb {
         .fetch_one(&self.pool)
         .await?;
 
-        row_to_custom_entry_type(&row)
+        let result = row_to_custom_entry_type(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn delete_entry_type(&self, id: &Uuid) -> Result<()> {
@@ -184,6 +189,7 @@ impl EntryTypeOps for SqliteDb {
             return Err(WorldflowError::NotFound(format!("entry_type {id}")));
         }
 
+        self.trigger_snapshot();
         Ok(())
     }
 

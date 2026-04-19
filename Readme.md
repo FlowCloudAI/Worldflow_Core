@@ -2,7 +2,7 @@
 
 `worldflow_core` 是一个 Rust 库，负责世界观/设定数据的核心存储层。
 
-它当前提供 8 组能力：
+它当前提供 8 组核心能力：
 
 - `Project`: 顶层项目容器
 - `Category`: 树状分类
@@ -12,6 +12,10 @@
 - `EntryRelation`: 词条关系
 - `EntryType`: 9 个内置类型 + 项目级自定义类型
 - `IdeaNote`: 灵感便签，Entry 的前置态，独立建模
+
+以及 1 个 SQLite 专属扩展：
+
+- `Snapshot`：伪数据库版本管理，全量导出 CSV + git2 管理历史，支持回退和追加恢复
 
 默认后端是 SQLite，可选启用 PostgreSQL。
 
@@ -76,14 +80,15 @@
 
 后端能力差异：
 
-| 项目 | SQLite | PostgreSQL |
-|---|---|---|
-| 默认启用 | 是 | 否 |
-| 连接入口 | `SqliteDb::new()` | `PgDb::new()` |
-| 迁移目录 | `migrations/` | `migrations_pg/` |
-| 搜索实现 | FTS5 `trigram`，索引 `title + content` | `to_tsvector('simple', title + summary + content)` + `plainto_tsquery` |
-| FTS 维护 | `optimize_fts()` | 无 |
-| 连接池上限 | 5 | 10 |
+| 项目     | SQLite                                    | PostgreSQL                                                             |
+|--------|-------------------------------------------|------------------------------------------------------------------------|
+| 默认启用   | 是                                         | 否                                                                      |
+| 连接入口   | `SqliteDb::new()` / `new_with_snapshot()` | `PgDb::new()`                                                          |
+| 迁移目录   | `migrations/`                             | `migrations_pg/`                                                       |
+| 搜索实现   | FTS5 `trigram`，索引 `title + content`       | `to_tsvector('simple', title + summary + content)` + `plainto_tsquery` |
+| FTS 维护 | `optimize_fts()`                          | 无                                                                      |
+| 连接池上限  | 5                                         | 10                                                                     |
+| 版本快照   | 有（CSV + git2）                             | 无                                                                      |
 
 ---
 
@@ -118,6 +123,7 @@ worldflow_core/
 │   └── db/
 │       ├── mod.rs
 │       ├── traits.rs
+│       ├── snapshot.rs          ← SQLite 专属，版本管理
 │       ├── sqlite.rs
 │       ├── postgres.rs
 │       ├── project.rs
@@ -138,6 +144,7 @@ worldflow_core/
 │       └── pg_idea_note.rs
 └── tests/
     ├── db.rs
+    ├── snapshot.rs              ← snapshot 功能集成测试（14 个用例）
     ├── stress_test.rs
     └── stress_test_pg.rs
 ```
@@ -563,6 +570,12 @@ PostgreSQL 迁移文件：
 
 ---
 
+## Snapshot 版本管理
+
+详见 [Snapshot.md](Snapshot.md)。
+
+---
+
 ## 面向 Codex 的修改建议
 
 如果你接到需求要改这个仓库，通常按下面套路最快：
@@ -670,9 +683,10 @@ sqlx migrate run
 
 ## 当前测试现状
 
-仓库里有 3 个集成测试文件：
+仓库里有 4 个集成测试文件：
 
 - [tests/db.rs](tests/db.rs)
+- [tests/snapshot.rs](tests/snapshot.rs) — snapshot 功能，14 个用例，全部通过
 - [tests/stress_test.rs](tests/stress_test.rs)
 - [tests/stress_test_pg.rs](tests/stress_test_pg.rs)
 
@@ -682,6 +696,7 @@ sqlx migrate run
 - `cargo check --lib --no-default-features --features postgres` 通过
 - `cargo test --lib` 通过
 - `cargo test --lib --no-default-features --features postgres` 通过
+- `cargo test --features sqlite --test snapshot` 通过（14/14）
 
 当前仓库的已知问题：
 
@@ -740,8 +755,8 @@ sqlx migrate run
 6. [src/db/entry.rs](src/db/entry.rs)
 7. [src/db/pg_entry.rs](src/db/pg_entry.rs)
 8. [src/db/entry_type.rs](src/db/entry_type.rs)
-9. [migrations/0001_init.sql](migrations/0001_init.sql)
-10. [migrations_pg/0001_init.sql](migrations_pg/0001_init.sql)
+9. [src/db/snapshot.rs](src/db/snapshot.rs) — SQLite 版本管理实现
+10. [migrations/0001_init.sql](migrations/0001_init.sql)
 
 ---
 

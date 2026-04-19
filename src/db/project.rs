@@ -26,13 +26,15 @@ impl ProjectOps for SqliteDb {
              VALUES (?, ?, ?, ?)
              RETURNING id, name, description, cover_image, created_at, updated_at",
         )
-            .bind(&id)
-            .bind(&input.name)
-            .bind(&input.description)
-            .bind(&input.cover_image)
-            .fetch_one(&self.pool)
-            .await?;
-        row_to_project(&row)
+        .bind(&id)
+        .bind(&input.name)
+        .bind(&input.description)
+        .bind(&input.cover_image)
+        .fetch_one(&self.pool)
+        .await?;
+        let result = row_to_project(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn get_project(&self, id: &Uuid) -> Result<Project> {
@@ -40,10 +42,10 @@ impl ProjectOps for SqliteDb {
             "SELECT id, name, description, cover_image, created_at, updated_at
              FROM projects WHERE id = ?",
         )
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| WorldflowError::NotFound(format!("project {id}")))?;
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| WorldflowError::NotFound(format!("project {id}")))?;
         row_to_project(&row)
     }
 
@@ -52,8 +54,8 @@ impl ProjectOps for SqliteDb {
             "SELECT id, name, description, cover_image, created_at, updated_at
              FROM projects ORDER BY created_at DESC",
         )
-            .fetch_all(&self.pool)
-            .await?;
+        .fetch_all(&self.pool)
+        .await?;
         rows.iter().map(row_to_project).collect()
     }
 
@@ -67,14 +69,16 @@ impl ProjectOps for SqliteDb {
              WHERE id = ?
              RETURNING id, name, description, cover_image, created_at, updated_at",
         )
-            .bind(&input.name)
-            .bind(&input.description)
-            .bind(input.cover_image.is_some())
-            .bind(input.cover_image.as_ref().and_then(|v| v.as_deref()))
-            .bind(id)
-            .fetch_one(&self.pool)
-            .await?;
-        row_to_project(&row)
+        .bind(&input.name)
+        .bind(&input.description)
+        .bind(input.cover_image.is_some())
+        .bind(input.cover_image.as_ref().and_then(|v| v.as_deref()))
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        let result = row_to_project(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn delete_project(&self, id: &Uuid) -> Result<()> {
@@ -85,6 +89,7 @@ impl ProjectOps for SqliteDb {
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("project {id}")));
         }
+        self.trigger_snapshot();
         Ok(())
     }
 }

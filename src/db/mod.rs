@@ -22,6 +22,8 @@ mod idea_note;
 #[cfg(feature = "sqlite")]
 mod project;
 #[cfg(feature = "sqlite")]
+pub(crate) mod snapshot;
+#[cfg(feature = "sqlite")]
 mod tag_schema;
 
 use crate::error::Result;
@@ -31,6 +33,12 @@ use sysinfo::System;
 #[cfg(feature = "sqlite")]
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 
+#[cfg(feature = "sqlite")]
+use std::sync::Arc;
+
+#[cfg(feature = "sqlite")]
+use snapshot::{SnapshotConfig, SnapshotState};
+
 /// 进程启动时探测一次可用内存，后续所有连接复用同一档位。
 /// 避免测试或高负载场景下重复调用时因内存波动导致每次连接拿到不同的 cache 配置。
 static AVAILABLE_MEMORY_MB: OnceLock<u64> = OnceLock::new();
@@ -39,6 +47,7 @@ static AVAILABLE_MEMORY_MB: OnceLock<u64> = OnceLock::new();
 #[derive(Clone, Debug)]
 pub struct SqliteDb {
     pub pool: SqlitePool,
+    pub(in crate::db) snapshot: Option<Arc<SnapshotState>>,
 }
 
 #[cfg(feature = "sqlite")]
@@ -64,7 +73,18 @@ impl SqliteDb {
         let memory_mb = Self::get_available_memory();
         Self::apply_memory_pragmas(&pool, memory_mb).await?;
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            snapshot: None,
+        })
+    }
+
+    pub async fn new_with_snapshot(database_url: &str, config: SnapshotConfig) -> Result<Self> {
+        let db = Self::new(database_url).await?;
+        Ok(Self {
+            pool: db.pool,
+            snapshot: Some(Arc::new(SnapshotState::new(config))),
+        })
     }
 
     pub async fn optimize_fts(&self) -> Result<()> {

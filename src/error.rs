@@ -16,6 +16,18 @@ pub enum WorldflowError {
 
     #[error("参数错误: {0}")]
     InvalidInput(String),
+
+    #[error("IO 错误: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Git 错误: {0}")]
+    Git(#[from] git2::Error),
+
+    #[error("CSV 错误: {0}")]
+    Csv(#[from] csv::Error),
+
+    #[error("快照未配置")]
+    SnapshotNotConfigured,
 }
 
 pub type Result<T> = std::result::Result<T, WorldflowError>;

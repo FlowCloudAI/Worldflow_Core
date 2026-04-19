@@ -98,7 +98,9 @@ impl EntryOps for SqliteDb {
             .fetch_one(&self.pool)
             .await?;
 
-        row_to_entry(&row)
+        let result = row_to_entry(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn get_entry(&self, id: &Uuid) -> Result<Entry> {
@@ -270,7 +272,9 @@ impl EntryOps for SqliteDb {
             .fetch_one(&self.pool)
             .await?;
 
-        row_to_entry(&row)
+        let result = row_to_entry(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn delete_entry(&self, id: &Uuid) -> Result<()> {
@@ -282,6 +286,7 @@ impl EntryOps for SqliteDb {
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("entry {id}")));
         }
+        self.trigger_snapshot();
         Ok(())
     }
 
@@ -320,6 +325,7 @@ impl EntryOps for SqliteDb {
         }
 
         tx.commit().await?;
+        self.trigger_snapshot();
         Ok(count)
     }
 }

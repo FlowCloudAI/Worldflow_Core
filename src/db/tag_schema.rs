@@ -65,7 +65,9 @@ impl TagSchemaOps for SqliteDb {
             .fetch_one(&self.pool)
             .await?;
 
-        row_to_tag_schema(&row)
+        let result = row_to_tag_schema(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn create_tag_schemas_bulk(
@@ -118,6 +120,7 @@ impl TagSchemaOps for SqliteDb {
         }
 
         tx.commit().await?;
+        self.trigger_snapshot();
         Ok(schemas)
     }
 
@@ -127,10 +130,10 @@ impl TagSchemaOps for SqliteDb {
                     default_val, range_min, range_max, sort_order, created_at, updated_at
              FROM tag_schemas WHERE id = ?",
         )
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| WorldflowError::NotFound(format!("tag_schema {id}")))?;
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| WorldflowError::NotFound(format!("tag_schema {id}")))?;
 
         row_to_tag_schema(&row)
     }
@@ -143,9 +146,9 @@ impl TagSchemaOps for SqliteDb {
              WHERE project_id = ?
              ORDER BY sort_order , name ",
         )
-            .bind(project_id)
-            .fetch_all(&self.pool)
-            .await?;
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await?;
 
         rows.iter().map(row_to_tag_schema).collect()
     }
@@ -168,19 +171,21 @@ impl TagSchemaOps for SqliteDb {
              RETURNING id, project_id, name, description, type, target,
                        default_val, range_min, range_max, sort_order, created_at, updated_at",
         )
-            .bind(&input.name)
-            .bind(&input.description)
-            .bind(&input.r#type)
-            .bind(&target)
-            .bind(&input.default_val)
-            .bind(input.range_min)
-            .bind(input.range_max)
-            .bind(input.sort_order)
-            .bind(id)
-            .fetch_one(&self.pool)
-            .await?;
+        .bind(&input.name)
+        .bind(&input.description)
+        .bind(&input.r#type)
+        .bind(&target)
+        .bind(&input.default_val)
+        .bind(input.range_min)
+        .bind(input.range_max)
+        .bind(input.sort_order)
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
 
-        row_to_tag_schema(&row)
+        let result = row_to_tag_schema(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn delete_tag_schema(&self, id: &Uuid) -> Result<()> {
@@ -192,6 +197,7 @@ impl TagSchemaOps for SqliteDb {
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("tag_schema {id}")));
         }
+        self.trigger_snapshot();
         Ok(())
     }
 }

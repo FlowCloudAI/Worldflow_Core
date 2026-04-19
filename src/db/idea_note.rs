@@ -48,7 +48,9 @@ impl IdeaNoteOps for SqliteDb {
         .fetch_one(&self.pool)
         .await?;
 
-        row_to_idea_note(&row)
+        let result = row_to_idea_note(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn get_idea_note(&self, id: &Uuid) -> Result<IdeaNote> {
@@ -121,7 +123,8 @@ impl IdeaNoteOps for SqliteDb {
 
         let row = sqlx::query(
             "UPDATE idea_notes
-             SET title              = CASE WHEN ? THEN ? ELSE title END,
+             SET project_id         = CASE WHEN ? THEN ? ELSE project_id END,
+                 title              = CASE WHEN ? THEN ? ELSE title END,
                  content            = COALESCE(?, content),
                  status             = COALESCE(?, status),
                  pinned             = COALESCE(?, pinned),
@@ -131,6 +134,9 @@ impl IdeaNoteOps for SqliteDb {
              RETURNING id, project_id, content, title, status, pinned,
                        created_at, updated_at, last_reviewed_at, converted_entry_id",
         )
+        // project_id: CASE WHEN project_id.is_some() THEN project_id.flatten() ELSE 原值 END
+        .bind(input.project_id.is_some())
+        .bind(input.project_id.flatten())
         // title: CASE WHEN title.is_some() THEN title.flatten() ELSE 原值 END
         .bind(input.title.is_some())
         .bind(input.title.flatten())
@@ -150,7 +156,9 @@ impl IdeaNoteOps for SqliteDb {
         .fetch_one(&self.pool)
         .await?;
 
-        row_to_idea_note(&row)
+        let result = row_to_idea_note(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn delete_idea_note(&self, id: &Uuid) -> Result<()> {
@@ -162,6 +170,7 @@ impl IdeaNoteOps for SqliteDb {
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("idea_note {id}")));
         }
+        self.trigger_snapshot();
         Ok(())
     }
 }

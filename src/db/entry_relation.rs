@@ -41,16 +41,18 @@ impl EntryRelationOps for SqliteDb {
              VALUES (?, ?, ?, ?, ?, ?)
              RETURNING id, project_id, a_id, b_id, relation, content, created_at, updated_at",
         )
-            .bind(&id)
-            .bind(&input.project_id)
-            .bind(a_id)
-            .bind(b_id)
-            .bind(input.relation.as_str())
-            .bind(&input.content)
-            .fetch_one(&self.pool)
-            .await?;
+        .bind(&id)
+        .bind(&input.project_id)
+        .bind(a_id)
+        .bind(b_id)
+        .bind(input.relation.as_str())
+        .bind(&input.content)
+        .fetch_one(&self.pool)
+        .await?;
 
-        row_to_relation(&row)
+        let result = row_to_relation(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn create_relations_bulk(
@@ -74,18 +76,19 @@ impl EntryRelationOps for SqliteDb {
                  VALUES (?, ?, ?, ?, ?, ?)
                  RETURNING id, project_id, a_id, b_id, relation, content, created_at, updated_at",
             )
-                .bind(id)
-                .bind(input.project_id)
-                .bind(a_id)
-                .bind(b_id)
-                .bind(input.relation.as_str())
-                .bind(input.content)
-                .fetch_one(&mut *tx)
-                .await?;
+            .bind(id)
+            .bind(input.project_id)
+            .bind(a_id)
+            .bind(b_id)
+            .bind(input.relation.as_str())
+            .bind(input.content)
+            .fetch_one(&mut *tx)
+            .await?;
             relations.push(row_to_relation(&row)?);
         }
 
         tx.commit().await?;
+        self.trigger_snapshot();
         Ok(relations)
     }
 
@@ -94,10 +97,10 @@ impl EntryRelationOps for SqliteDb {
             "SELECT id, project_id, a_id, b_id, relation, content, created_at, updated_at
              FROM entry_relations WHERE id = ?",
         )
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| WorldflowError::NotFound(format!("relation {id}")))?;
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| WorldflowError::NotFound(format!("relation {id}")))?;
 
         row_to_relation(&row)
     }
@@ -110,10 +113,10 @@ impl EntryRelationOps for SqliteDb {
                 OR (b_id = ? AND relation = 'two_way')
              ORDER BY created_at ",
         )
-            .bind(entry_id)
-            .bind(entry_id)
-            .fetch_all(&self.pool)
-            .await?;
+        .bind(entry_id)
+        .bind(entry_id)
+        .fetch_all(&self.pool)
+        .await?;
 
         rows.iter().map(row_to_relation).collect()
     }
@@ -125,9 +128,9 @@ impl EntryRelationOps for SqliteDb {
              WHERE project_id = ?
              ORDER BY created_at ",
         )
-            .bind(project_id)
-            .fetch_all(&self.pool)
-            .await?;
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await?;
 
         rows.iter().map(row_to_relation).collect()
     }
@@ -166,7 +169,9 @@ impl EntryRelationOps for SqliteDb {
             .fetch_one(&self.pool)
             .await?;
 
-        row_to_relation(&row)
+        let result = row_to_relation(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn delete_relation(&self, id: &Uuid) -> Result<()> {
@@ -178,6 +183,7 @@ impl EntryRelationOps for SqliteDb {
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("relation {id}")));
         }
+        self.trigger_snapshot();
         Ok(())
     }
 
@@ -187,13 +193,15 @@ impl EntryRelationOps for SqliteDb {
              WHERE (a_id = ? AND b_id = ?)
                 OR (a_id = ? AND b_id = ?)",
         )
-            .bind(entry_a)
-            .bind(entry_b)
-            .bind(entry_b)
-            .bind(entry_a)
-            .execute(&self.pool)
-            .await?;
+        .bind(entry_a)
+        .bind(entry_b)
+        .bind(entry_b)
+        .bind(entry_a)
+        .execute(&self.pool)
+        .await?;
 
-        Ok(result.rows_affected())
+        let affected = result.rows_affected();
+        self.trigger_snapshot();
+        Ok(affected)
     }
 }

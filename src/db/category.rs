@@ -30,10 +30,10 @@ impl CategoryOps for SqliteDb {
          )
          SELECT COUNT(*) as cnt FROM descendants WHERE id = ?",
         )
-            .bind(id)
-            .bind(new_parent_id)
-            .fetch_one(&self.pool)
-            .await?;
+        .bind(id)
+        .bind(new_parent_id)
+        .fetch_one(&self.pool)
+        .await?;
 
         let cnt: i64 = row.try_get("cnt")?;
         Ok(cnt > 0)
@@ -47,14 +47,16 @@ impl CategoryOps for SqliteDb {
              VALUES (?, ?, ?, ?, ?)
              RETURNING id, project_id, parent_id, name, sort_order, created_at, updated_at",
         )
-            .bind(&id)
-            .bind(&input.project_id)
-            .bind(&input.parent_id)
-            .bind(&input.name)
-            .bind(sort_order)
-            .fetch_one(&self.pool)
-            .await?;
-        row_to_category(&row)
+        .bind(&id)
+        .bind(&input.project_id)
+        .bind(&input.parent_id)
+        .bind(&input.name)
+        .bind(sort_order)
+        .fetch_one(&self.pool)
+        .await?;
+        let result = row_to_category(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn create_categories_bulk(&self, inputs: Vec<CreateCategory>) -> Result<Vec<Category>> {
@@ -69,17 +71,18 @@ impl CategoryOps for SqliteDb {
                  VALUES (?, ?, ?, ?, ?)
                  RETURNING id, project_id, parent_id, name, sort_order, created_at, updated_at",
             )
-                .bind(id)
-                .bind(input.project_id)
-                .bind(input.parent_id)
-                .bind(input.name)
-                .bind(sort_order)
-                .fetch_one(&mut *tx)
-                .await?;
+            .bind(id)
+            .bind(input.project_id)
+            .bind(input.parent_id)
+            .bind(input.name)
+            .bind(sort_order)
+            .fetch_one(&mut *tx)
+            .await?;
             categories.push(row_to_category(&row)?);
         }
 
         tx.commit().await?;
+        self.trigger_snapshot();
         Ok(categories)
     }
 
@@ -88,10 +91,10 @@ impl CategoryOps for SqliteDb {
             "SELECT id, project_id, parent_id, name, sort_order, created_at, updated_at
              FROM categories WHERE id = ?",
         )
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| WorldflowError::NotFound(format!("category {id}")))?;
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| WorldflowError::NotFound(format!("category {id}")))?;
         row_to_category(&row)
     }
 
@@ -102,9 +105,9 @@ impl CategoryOps for SqliteDb {
              WHERE project_id = ?
              ORDER BY parent_id NULLS FIRST, sort_order , name ",
         )
-            .bind(project_id)
-            .fetch_all(&self.pool)
-            .await?;
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await?;
         rows.iter().map(row_to_category).collect()
     }
 
@@ -130,7 +133,7 @@ impl CategoryOps for SqliteDb {
                 .bind(input.sort_order)
                 .bind(id)
                 .fetch_one(&self.pool)
-                    .await?
+                .await?
             }
 
             Some(new_parent) => {
@@ -147,10 +150,12 @@ impl CategoryOps for SqliteDb {
                 .bind(input.sort_order)
                 .bind(id)
                 .fetch_one(&self.pool)
-                    .await?
+                .await?
             }
         };
-        row_to_category(&row)
+        let result = row_to_category(&row)?;
+        self.trigger_snapshot();
+        Ok(result)
     }
 
     async fn delete_category(&self, id: &Uuid) -> Result<()> {
@@ -161,6 +166,7 @@ impl CategoryOps for SqliteDb {
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("category {id}")));
         }
+        self.trigger_snapshot();
         Ok(())
     }
 }
