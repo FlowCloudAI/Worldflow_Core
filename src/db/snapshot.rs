@@ -8,21 +8,21 @@ use uuid::Uuid;
 
 // ═══════════════════════════════════════ Public types ════════════════════════════════════════════
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct SnapshotConfig {
     pub dir: PathBuf,
     pub author_name: String,
     pub author_email: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SnapshotInfo {
     pub id: String,
     pub message: String,
     pub timestamp: i64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize)]
 pub struct AppendResult {
     pub projects: usize,
     pub categories: usize,
@@ -34,6 +34,7 @@ pub struct AppendResult {
     pub idea_notes: usize,
 }
 
+#[derive(Debug, Serialize)]
 pub enum RestoreMode {
     Replace,
     Merge,
