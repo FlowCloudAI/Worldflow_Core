@@ -14,7 +14,9 @@ pub use error::{Result, WorldflowError};
 pub use db::SqliteDb;
 
 #[cfg(feature = "sqlite")]
-pub use db::snapshot::{AppendResult, RestoreMode, SnapshotConfig, SnapshotInfo};
+pub use db::snapshot::{
+    AppendResult, RestoreMode, SnapshotBranchInfo, SnapshotConfig, SnapshotInfo,
+};
 
 #[cfg(feature = "postgres")]
 pub use db::PgDb;

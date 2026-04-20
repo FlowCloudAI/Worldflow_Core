@@ -15,7 +15,7 @@
 
 以及 1 个 SQLite 专属扩展：
 
-- `Snapshot`：伪数据库版本管理，全量导出 CSV + git2 管理历史，支持回退和追加恢复
+- `Snapshot`：伪数据库版本管理，全量导出 CSV + git2 管理历史，支持提交信息、活动分支、回退和追加恢复
 
 默认后端是 SQLite，可选启用 PostgreSQL。
 
@@ -574,6 +574,18 @@ PostgreSQL 迁移文件：
 
 详见 [Snapshot.md](docs/Snapshot.md)。
 
+当前 Snapshot 已支持：
+
+- 自定义提交信息
+- 活动分支持久化
+- 分支创建、列出、切换
+- 切换分支时把数据库恢复到目标分支 tip
+
+当前 Snapshot 的分支约束：
+
+- 没有任何基线提交时不能创建分支
+- 这是库内显式约束，不只依赖 APP 端校验
+
 ---
 
 ## 面向 Codex 的修改建议
@@ -686,7 +698,7 @@ sqlx migrate run
 仓库里有 4 个集成测试文件：
 
 - [tests/db.rs](tests/db.rs)
-- [tests/snapshot.rs](tests/snapshot.rs) — snapshot 功能，14 个用例，全部通过
+- [tests/snapshot.rs](tests/snapshot.rs)
 - [tests/stress_test.rs](tests/stress_test.rs)
 - [tests/stress_test_pg.rs](tests/stress_test_pg.rs)
 
@@ -696,7 +708,7 @@ sqlx migrate run
 - `cargo check --lib --no-default-features --features postgres` 通过
 - `cargo test --lib` 通过
 - `cargo test --lib --no-default-features --features postgres` 通过
-- `cargo test --features sqlite --test snapshot` 通过（14/14）
+- `cargo test --lib snapshot::tests` 通过（活动分支持久化、分支切换恢复数据库）
 
 当前仓库的已知问题：
 

@@ -1,5 +1,5 @@
 use crate::error::{Result, WorldflowError};
-use git2::{IndexAddOption, Repository, Signature, Sort};
+use git2::{BranchType, IndexAddOption, Repository, Signature, Sort};
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqliteConnection, SqlitePool};
 use std::path::{Path, PathBuf};
@@ -20,6 +20,14 @@ pub struct SnapshotInfo {
     pub id: String,
     pub message: String,
     pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SnapshotBranchInfo {
+    pub name: String,
+    pub head: Option<String>,
+    pub is_current: bool,
+    pub is_active: bool,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -45,14 +53,57 @@ pub enum RestoreMode {
 #[derive(Debug)]
 pub(super) struct SnapshotState {
     pub config: SnapshotConfig,
-    lock: Mutex<()>,
+    lock: Mutex<SnapshotRuntimeState>,
+}
+
+#[derive(Debug)]
+struct SnapshotRuntimeState {
+    active_branch: String,
+}
+
+const ACTIVE_BRANCH_FILE: &str = ".worldflow-active-branch";
+
+fn active_branch_file(dir: &Path) -> PathBuf {
+    dir.join(ACTIVE_BRANCH_FILE)
+}
+
+fn load_persisted_active_branch(dir: &Path) -> Option<String> {
+    let path = active_branch_file(dir);
+    let branch = std::fs::read_to_string(path).ok()?;
+    let branch = branch.trim();
+    if branch.is_empty() {
+        None
+    } else {
+        Some(branch.to_owned())
+    }
+}
+
+fn persist_active_branch(dir: &Path, branch_name: &str) -> Result<()> {
+    std::fs::create_dir_all(dir).map_err(WorldflowError::Io)?;
+    std::fs::write(active_branch_file(dir), branch_name.as_bytes()).map_err(WorldflowError::Io)?;
+    Ok(())
+}
+
+fn detect_active_branch(dir: &Path) -> String {
+    if let Some(branch) = load_persisted_active_branch(dir) {
+        return branch;
+    }
+    let Ok(repo) = Repository::open(dir) else {
+        return "main".to_owned();
+    };
+    let Ok(head) = repo.head() else {
+        return "main".to_owned();
+    };
+    head.shorthand().unwrap_or("main").to_owned()
 }
 
 impl SnapshotState {
     pub fn new(config: SnapshotConfig) -> Self {
+        let active_branch = detect_active_branch(&config.dir);
+        let _ = persist_active_branch(&config.dir, &active_branch);
         Self {
+            lock: Mutex::new(SnapshotRuntimeState { active_branch }),
             config,
-            lock: Mutex::new(()),
         }
     }
 }
@@ -539,11 +590,16 @@ struct AllCsvBytes {
     idea_notes: Vec<u8>,
 }
 
-fn sync_git_commit(
+fn branch_ref_name(branch_name: &str) -> String {
+    format!("refs/heads/{branch_name}")
+}
+
+fn sync_git_commit_to_ref(
     dir: &Path,
     message: &str,
     author_name: &str,
     author_email: &str,
+    update_ref: &str,
 ) -> std::result::Result<(), git2::Error> {
     let repo = Repository::open(dir).or_else(|_| Repository::init(dir))?;
     let sig = Signature::now(author_name, author_email)?;
@@ -554,24 +610,36 @@ fn sync_git_commit(
     let tree_id = index.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
 
-    let parent_commits: Vec<git2::Commit<'_>> = match repo.head() {
-        Ok(head) => vec![head.peel_to_commit()?],
+    let parent_commits: Vec<git2::Commit<'_>> = match repo.revparse_single(update_ref) {
+        Ok(obj) => vec![obj.peel_to_commit()?],
+        Err(_) if update_ref == "HEAD" => match repo.head() {
+            Ok(head) => vec![head.peel_to_commit()?],
+            Err(_) => vec![],
+        },
         Err(_) => vec![],
     };
     let parent_refs: Vec<&git2::Commit<'_>> = parent_commits.iter().collect();
 
-    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)?;
+    repo.commit(Some(update_ref), &sig, &sig, message, &tree, &parent_refs)?;
     Ok(())
 }
 
-fn sync_git_list(dir: &Path) -> std::result::Result<Vec<SnapshotInfo>, git2::Error> {
+fn sync_git_list_ref(
+    dir: &Path,
+    git_ref: &str,
+) -> std::result::Result<Vec<SnapshotInfo>, git2::Error> {
     let repo = match Repository::open(dir) {
         Ok(r) => r,
         Err(_) => return Ok(vec![]),
     };
 
     let mut walk = repo.revwalk()?;
-    if walk.push_head().is_err() {
+    let pushed = if git_ref == "HEAD" {
+        walk.push_head()
+    } else {
+        walk.push_ref(git_ref)
+    };
+    if pushed.is_err() {
         return Ok(vec![]);
     }
     walk.set_sorting(Sort::TIME)?;
@@ -589,15 +657,75 @@ fn sync_git_list(dir: &Path) -> std::result::Result<Vec<SnapshotInfo>, git2::Err
     Ok(results)
 }
 
-fn sync_git_read_all(dir: &Path, commit_id: &str) -> std::result::Result<AllCsvBytes, git2::Error> {
+fn sync_git_list_branches(
+    dir: &Path,
+    active_branch: &str,
+) -> std::result::Result<Vec<SnapshotBranchInfo>, git2::Error> {
+    let repo = match Repository::open(dir) {
+        Ok(r) => r,
+        Err(_) => return Ok(vec![]),
+    };
+
+    let mut results = Vec::new();
+    for branch in repo.branches(Some(BranchType::Local))? {
+        let (branch, _) = branch?;
+        let name = branch
+            .name()?
+            .ok_or_else(|| git2::Error::from_str("invalid utf-8 branch name"))?
+            .to_string();
+        let head = branch.get().target().map(|oid| oid.to_string());
+        let is_current = branch.is_head();
+        results.push(SnapshotBranchInfo {
+            is_active: active_branch == name,
+            name,
+            head,
+            is_current,
+        });
+    }
+    Ok(results)
+}
+
+fn sync_git_create_branch(
+    dir: &Path,
+    branch_name: &str,
+    from_ref: Option<&str>,
+) -> std::result::Result<(), git2::Error> {
+    let repo = Repository::open(dir).or_else(|_| Repository::init(dir))?;
+    let start_ref = from_ref.unwrap_or("HEAD");
+    let commit = repo.revparse_single(start_ref)?.peel_to_commit()?;
+    repo.branch(branch_name, &commit, false)?;
+    Ok(())
+}
+
+fn sync_git_branch_exists(dir: &Path, branch_name: &str) -> std::result::Result<bool, git2::Error> {
+    let repo = match Repository::open(dir) {
+        Ok(r) => r,
+        Err(_) => return Ok(false),
+    };
+    Ok(repo.find_branch(branch_name, BranchType::Local).is_ok())
+}
+
+fn sync_git_ref_exists(dir: &Path, git_ref: &str) -> std::result::Result<bool, git2::Error> {
+    let repo = match Repository::open(dir) {
+        Ok(r) => r,
+        Err(_) => return Ok(false),
+    };
+    Ok(repo.revparse_single(git_ref).is_ok())
+}
+
+fn sync_git_read_all_ref(
+    dir: &Path,
+    git_ref: &str,
+    display_name: &str,
+) -> std::result::Result<AllCsvBytes, git2::Error> {
     let repo = Repository::open(dir)?;
-    let commit = repo.revparse_single(commit_id)?.peel_to_commit()?;
+    let commit = repo.revparse_single(git_ref)?.peel_to_commit()?;
     let tree = commit.tree()?;
 
     let read_blob = |name: &str| -> std::result::Result<Vec<u8>, git2::Error> {
-        let entry = tree.get_name(name).ok_or_else(|| {
-            git2::Error::from_str(&format!("{name} not found in commit {commit_id}"))
-        })?;
+        let entry = tree
+            .get_name(name)
+            .ok_or_else(|| git2::Error::from_str(&format!("{name} not found in {display_name}")))?;
         let blob = repo.find_blob(entry.id())?;
         Ok(blob.content().to_vec())
     };
@@ -614,22 +742,70 @@ fn sync_git_read_all(dir: &Path, commit_id: &str) -> std::result::Result<AllCsvB
     })
 }
 
-async fn git_commit_snapshot(
+fn sync_git_read_all(dir: &Path, commit_id: &str) -> std::result::Result<AllCsvBytes, git2::Error> {
+    sync_git_read_all_ref(dir, commit_id, &format!("commit {commit_id}"))
+}
+
+async fn git_commit_snapshot_to_branch(
     dir: PathBuf,
+    branch_name: String,
     message: String,
     author_name: String,
     author_email: String,
 ) -> Result<()> {
     tokio::task::spawn_blocking(move || {
-        sync_git_commit(&dir, &message, &author_name, &author_email)
+        sync_git_commit_to_ref(
+            &dir,
+            &message,
+            &author_name,
+            &author_email,
+            &branch_ref_name(&branch_name),
+        )
     })
     .await
     .map_err(|e| WorldflowError::InvalidInput(format!("git task panicked: {e}")))?
     .map_err(WorldflowError::Git)
 }
 
-async fn git_list_commits(dir: PathBuf) -> Result<Vec<SnapshotInfo>> {
-    tokio::task::spawn_blocking(move || sync_git_list(&dir))
+async fn git_list_commits_in_branch(
+    dir: PathBuf,
+    branch_name: String,
+) -> Result<Vec<SnapshotInfo>> {
+    tokio::task::spawn_blocking(move || sync_git_list_ref(&dir, &branch_ref_name(&branch_name)))
+        .await
+        .map_err(|e| WorldflowError::InvalidInput(format!("git task panicked: {e}")))?
+        .map_err(WorldflowError::Git)
+}
+
+async fn git_list_branches(dir: PathBuf, active_branch: String) -> Result<Vec<SnapshotBranchInfo>> {
+    tokio::task::spawn_blocking(move || sync_git_list_branches(&dir, &active_branch))
+        .await
+        .map_err(|e| WorldflowError::InvalidInput(format!("git task panicked: {e}")))?
+        .map_err(WorldflowError::Git)
+}
+
+async fn git_create_branch(
+    dir: PathBuf,
+    branch_name: String,
+    from_ref: Option<String>,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        sync_git_create_branch(&dir, &branch_name, from_ref.as_deref())
+    })
+    .await
+    .map_err(|e| WorldflowError::InvalidInput(format!("git task panicked: {e}")))?
+    .map_err(WorldflowError::Git)
+}
+
+async fn git_branch_exists(dir: PathBuf, branch_name: String) -> Result<bool> {
+    tokio::task::spawn_blocking(move || sync_git_branch_exists(&dir, &branch_name))
+        .await
+        .map_err(|e| WorldflowError::InvalidInput(format!("git task panicked: {e}")))?
+        .map_err(WorldflowError::Git)
+}
+
+async fn git_ref_exists(dir: PathBuf, git_ref: String) -> Result<bool> {
+    tokio::task::spawn_blocking(move || sync_git_ref_exists(&dir, &git_ref))
         .await
         .map_err(|e| WorldflowError::InvalidInput(format!("git task panicked: {e}")))?
         .map_err(WorldflowError::Git)
@@ -640,6 +816,16 @@ async fn git_read_all_from_commit(dir: PathBuf, commit_id: String) -> Result<All
         .await
         .map_err(|e| WorldflowError::InvalidInput(format!("git task panicked: {e}")))?
         .map_err(WorldflowError::Git)
+}
+
+async fn git_read_all_from_branch(dir: PathBuf, branch_name: String) -> Result<AllCsvBytes> {
+    tokio::task::spawn_blocking(move || {
+        let git_ref = branch_ref_name(&branch_name);
+        sync_git_read_all_ref(&dir, &git_ref, &format!("branch {branch_name}"))
+    })
+    .await
+    .map_err(|e| WorldflowError::InvalidInput(format!("git task panicked: {e}")))?
+    .map_err(WorldflowError::Git)
 }
 
 // ═══════════════════════════════════════ Import / restore ════════════════════════════════════════
@@ -969,10 +1155,16 @@ async fn insert_idea_notes(conn: &mut SqliteConnection, rows: &[IdeaNoteRow]) ->
 
 // ═══════════════════════════════════════ Glue ════════════════════════════════════════════════════
 
-async fn do_snapshot(pool: &SqlitePool, config: &SnapshotConfig, message: &str) -> Result<()> {
+async fn do_snapshot_to_branch(
+    pool: &SqlitePool,
+    config: &SnapshotConfig,
+    branch_name: &str,
+    message: &str,
+) -> Result<()> {
     export_all(pool, &config.dir).await?;
-    git_commit_snapshot(
+    git_commit_snapshot_to_branch(
         config.dir.clone(),
+        branch_name.to_owned(),
         message.to_owned(),
         config.author_name.clone(),
         config.author_email.clone(),
@@ -993,17 +1185,17 @@ use crate::db::SqliteDb;
 
 impl SqliteDb {
     pub async fn snapshot(&self) -> Result<()> {
+        self.snapshot_with_message(&format!("manual {}", current_unix_secs()))
+            .await
+    }
+
+    pub async fn snapshot_with_message(&self, message: &str) -> Result<()> {
         let state = self
             .snapshot
             .as_ref()
             .ok_or(WorldflowError::SnapshotNotConfigured)?;
-        let _guard = state.lock.lock().await;
-        do_snapshot(
-            &self.pool,
-            &state.config,
-            &format!("manual {}", current_unix_secs()),
-        )
-        .await
+        let guard = state.lock.lock().await;
+        do_snapshot_to_branch(&self.pool, &state.config, &guard.active_branch, message).await
     }
 
     pub async fn list_snapshots(&self) -> Result<Vec<SnapshotInfo>> {
@@ -1011,7 +1203,100 @@ impl SqliteDb {
             .snapshot
             .as_ref()
             .ok_or(WorldflowError::SnapshotNotConfigured)?;
-        git_list_commits(state.config.dir.clone()).await
+        let active_branch = {
+            let guard = state.lock.lock().await;
+            guard.active_branch.clone()
+        };
+        git_list_commits_in_branch(state.config.dir.clone(), active_branch).await
+    }
+
+    pub async fn list_branches(&self) -> Result<Vec<SnapshotBranchInfo>> {
+        let state = self
+            .snapshot
+            .as_ref()
+            .ok_or(WorldflowError::SnapshotNotConfigured)?;
+        let active_branch = {
+            let guard = state.lock.lock().await;
+            guard.active_branch.clone()
+        };
+        git_list_branches(state.config.dir.clone(), active_branch).await
+    }
+
+    pub async fn active_branch(&self) -> Result<String> {
+        let state = self
+            .snapshot
+            .as_ref()
+            .ok_or(WorldflowError::SnapshotNotConfigured)?;
+        let guard = state.lock.lock().await;
+        Ok(guard.active_branch.clone())
+    }
+
+    pub async fn create_branch(&self, branch_name: &str, from_ref: Option<&str>) -> Result<()> {
+        let state = self
+            .snapshot
+            .as_ref()
+            .ok_or(WorldflowError::SnapshotNotConfigured)?;
+        let guard = state.lock.lock().await;
+        let start_ref = from_ref
+            .map(str::to_owned)
+            .unwrap_or_else(|| branch_ref_name(&guard.active_branch));
+        if !git_ref_exists(state.config.dir.clone(), start_ref.clone()).await? {
+            return Err(WorldflowError::InvalidInput(
+                "当前没有基线提交，不能创建分支".to_owned(),
+            ));
+        }
+        git_create_branch(
+            state.config.dir.clone(),
+            branch_name.to_owned(),
+            Some(start_ref),
+        )
+        .await
+    }
+
+    pub async fn switch_branch(&self, branch_name: &str) -> Result<()> {
+        let state = self
+            .snapshot
+            .as_ref()
+            .ok_or(WorldflowError::SnapshotNotConfigured)?;
+        let mut guard = state.lock.lock().await;
+        if guard.active_branch == branch_name {
+            return Ok(());
+        }
+        if !git_branch_exists(state.config.dir.clone(), branch_name.to_owned()).await? {
+            return Err(WorldflowError::NotFound(format!(
+                "分支不存在: {branch_name}"
+            )));
+        }
+        do_snapshot_to_branch(
+            &self.pool,
+            &state.config,
+            &guard.active_branch,
+            &format!("pre-switch-to-{branch_name} {}", current_unix_secs()),
+        )
+        .await?;
+        let bytes =
+            git_read_all_from_branch(state.config.dir.clone(), branch_name.to_owned()).await?;
+        apply_csv_bytes(&self.pool, bytes, RestoreMode::Replace).await?;
+        persist_active_branch(&state.config.dir, branch_name)?;
+        guard.active_branch = branch_name.to_owned();
+        Ok(())
+    }
+
+    pub async fn list_snapshots_in_branch(&self, branch_name: &str) -> Result<Vec<SnapshotInfo>> {
+        let state = self
+            .snapshot
+            .as_ref()
+            .ok_or(WorldflowError::SnapshotNotConfigured)?;
+        git_list_commits_in_branch(state.config.dir.clone(), branch_name.to_owned()).await
+    }
+
+    pub async fn snapshot_to_branch(&self, branch_name: &str, message: &str) -> Result<()> {
+        let state = self
+            .snapshot
+            .as_ref()
+            .ok_or(WorldflowError::SnapshotNotConfigured)?;
+        let _guard = state.lock.lock().await;
+        do_snapshot_to_branch(&self.pool, &state.config, branch_name, message).await
     }
 
     pub async fn rollback_to(&self, snapshot_id: &str) -> Result<()> {
@@ -1021,10 +1306,11 @@ impl SqliteDb {
             .ok_or(WorldflowError::SnapshotNotConfigured)?;
         // Hold lock for the entire operation: prevents auto-snapshots from
         // capturing a half-cleared database during the replace.
-        let _guard = state.lock.lock().await;
-        do_snapshot(
+        let guard = state.lock.lock().await;
+        do_snapshot_to_branch(
             &self.pool,
             &state.config,
+            &guard.active_branch,
             &format!("pre-rollback {}", current_unix_secs()),
         )
         .await?;
@@ -1067,10 +1353,11 @@ impl SqliteDb {
         };
         let pool = self.pool.clone();
         tokio::spawn(async move {
-            let _guard = state.lock.lock().await;
-            if let Err(e) = do_snapshot(
+            let guard = state.lock.lock().await;
+            if let Err(e) = do_snapshot_to_branch(
                 &pool,
                 &state.config,
+                &guard.active_branch,
                 &format!("auto {}", current_unix_secs()),
             )
             .await
@@ -1078,5 +1365,121 @@ impl SqliteDb {
                 eprintln!("[worldflow] snapshot error: {e}");
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ACTIVE_BRANCH_FILE, SnapshotConfig};
+    use crate::db::SqliteDb;
+    use crate::error::Result;
+    use sqlx::Row;
+    use std::path::Path;
+    use tempfile::TempDir;
+    use uuid::Uuid;
+
+    fn test_paths(prefix: &str) -> Result<(TempDir, String, std::path::PathBuf)> {
+        let temp = tempfile::tempdir()?;
+        let db_path = temp.path().join(format!("{prefix}.db"));
+        let snapshot_dir = temp.path().join("snapshots");
+        Ok((
+            temp,
+            format!(
+                "sqlite:{}?mode=rwc",
+                db_path.to_string_lossy().replace('\\', "/")
+            ),
+            snapshot_dir,
+        ))
+    }
+
+    async fn new_test_db(database_url: &str, snapshot_dir: &Path) -> Result<SqliteDb> {
+        SqliteDb::new_with_snapshot(
+            database_url,
+            SnapshotConfig {
+                dir: snapshot_dir.to_path_buf(),
+                author_name: "测试".to_owned(),
+                author_email: "test@example.com".to_owned(),
+            },
+        )
+        .await
+    }
+
+    async fn insert_project(db: &SqliteDb, name: &str) -> Result<Uuid> {
+        let id = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO projects (id, name, description, cover_image)
+             VALUES (?, ?, NULL, NULL)",
+        )
+        .bind(id)
+        .bind(name)
+        .execute(&db.pool)
+        .await?;
+        Ok(id)
+    }
+
+    async fn update_project_name(db: &SqliteDb, id: Uuid, name: &str) -> Result<()> {
+        sqlx::query("UPDATE projects SET name = ? WHERE id = ?")
+            .bind(name)
+            .bind(id)
+            .execute(&db.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn get_project_name(db: &SqliteDb, id: Uuid) -> Result<String> {
+        let row = sqlx::query("SELECT name FROM projects WHERE id = ?")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await?;
+        Ok(row.try_get("name")?)
+    }
+
+    #[tokio::test]
+    async fn active_branch_persists_across_reopen() -> Result<()> {
+        let (_temp, database_url, snapshot_dir) = test_paths("persist_active_branch")?;
+        let db = new_test_db(&database_url, &snapshot_dir).await?;
+
+        let project_id = insert_project(&db, "主线项目").await?;
+        db.snapshot_with_message("main init").await?;
+        db.create_branch("feature", None).await?;
+        db.switch_branch("feature").await?;
+        update_project_name(&db, project_id, "分支项目").await?;
+        db.snapshot_with_message("feature update").await?;
+
+        let persisted = std::fs::read_to_string(snapshot_dir.join(ACTIVE_BRANCH_FILE))?;
+        assert_eq!(persisted.trim(), "feature");
+
+        drop(db);
+
+        let reopened = new_test_db(&database_url, &snapshot_dir).await?;
+        assert_eq!(reopened.active_branch().await?, "feature");
+
+        let snapshots = reopened.list_snapshots().await?;
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[0].message, "feature update");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn switch_branch_restores_database_to_branch_tip() -> Result<()> {
+        let (_temp, database_url, snapshot_dir) = test_paths("switch_branch_restore")?;
+        let db = new_test_db(&database_url, &snapshot_dir).await?;
+
+        let project_id = insert_project(&db, "主线项目").await?;
+        db.snapshot_with_message("main init").await?;
+        db.create_branch("feature", None).await?;
+
+        db.switch_branch("feature").await?;
+        update_project_name(&db, project_id, "特性版本").await?;
+        db.snapshot_with_message("feature update").await?;
+
+        db.switch_branch("main").await?;
+        assert_eq!(db.active_branch().await?, "main");
+        assert_eq!(get_project_name(&db, project_id).await?, "主线项目");
+
+        db.switch_branch("feature").await?;
+        assert_eq!(db.active_branch().await?, "feature");
+        assert_eq!(get_project_name(&db, project_id).await?, "特性版本");
+        Ok(())
     }
 }
