@@ -87,9 +87,9 @@ entries.csv   entry_relations.csv  entry_links.csv  idea_notes.csv
 
 ## 相关文件
 
-- 实现：[src/db/snapshot.rs](src/db/snapshot.rs)
-- 公开导出：[src/lib.rs](src/lib.rs) — `#[cfg(feature = "sqlite")]`
-- 测试：[tests/snapshot.rs](tests/snapshot.rs)（14 个用例）
+- 实现：[src/db/snapshot.rs](../src/db/snapshot.rs)
+- 公开导出：[src/lib.rs](../src/lib.rs) — `#[cfg(feature = "sqlite")]`
+- 测试：[tests/snapshot.rs](../tests/snapshot.rs)（14 个用例）
 
 ```bash
 cargo test --features sqlite --test snapshot

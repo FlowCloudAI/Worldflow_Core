@@ -572,7 +572,7 @@ PostgreSQL 迁移文件：
 
 ## Snapshot 版本管理
 
-详见 [Snapshot.md](Snapshot.md)。
+详见 [Snapshot.md](docs/Snapshot.md)。
 
 ---
 
