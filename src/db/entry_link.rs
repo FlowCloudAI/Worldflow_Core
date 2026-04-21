@@ -45,7 +45,6 @@ impl EntryLinkOps for SqliteDb {
         .await?;
 
         let result = row_to_link(&row)?;
-        self.trigger_snapshot();
         Ok(result)
     }
 
@@ -84,7 +83,6 @@ impl EntryLinkOps for SqliteDb {
             .await?;
 
         let affected = result.rows_affected();
-        self.trigger_snapshot();
         Ok(affected)
     }
 
@@ -119,7 +117,6 @@ impl EntryLinkOps for SqliteDb {
         }
 
         tx.commit().await?;
-        self.trigger_snapshot();
         Ok(links)
     }
 }

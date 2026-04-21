@@ -33,7 +33,6 @@ impl ProjectOps for SqliteDb {
         .fetch_one(&self.pool)
         .await?;
         let result = row_to_project(&row)?;
-        self.trigger_snapshot();
         Ok(result)
     }
 
@@ -77,7 +76,6 @@ impl ProjectOps for SqliteDb {
         .fetch_one(&self.pool)
         .await?;
         let result = row_to_project(&row)?;
-        self.trigger_snapshot();
         Ok(result)
     }
 
@@ -89,7 +87,6 @@ impl ProjectOps for SqliteDb {
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("project {id}")));
         }
-        self.trigger_snapshot();
         Ok(())
     }
 }

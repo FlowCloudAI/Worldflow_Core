@@ -51,7 +51,6 @@ impl EntryRelationOps for SqliteDb {
         .await?;
 
         let result = row_to_relation(&row)?;
-        self.trigger_snapshot();
         Ok(result)
     }
 
@@ -88,7 +87,6 @@ impl EntryRelationOps for SqliteDb {
         }
 
         tx.commit().await?;
-        self.trigger_snapshot();
         Ok(relations)
     }
 
@@ -170,7 +168,6 @@ impl EntryRelationOps for SqliteDb {
             .await?;
 
         let result = row_to_relation(&row)?;
-        self.trigger_snapshot();
         Ok(result)
     }
 
@@ -183,7 +180,6 @@ impl EntryRelationOps for SqliteDb {
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("relation {id}")));
         }
-        self.trigger_snapshot();
         Ok(())
     }
 
@@ -201,7 +197,6 @@ impl EntryRelationOps for SqliteDb {
         .await?;
 
         let affected = result.rows_affected();
-        self.trigger_snapshot();
         Ok(affected)
     }
 }

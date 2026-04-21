@@ -49,7 +49,6 @@ impl IdeaNoteOps for SqliteDb {
         .await?;
 
         let result = row_to_idea_note(&row)?;
-        self.trigger_snapshot();
         Ok(result)
     }
 
@@ -157,7 +156,6 @@ impl IdeaNoteOps for SqliteDb {
         .await?;
 
         let result = row_to_idea_note(&row)?;
-        self.trigger_snapshot();
         Ok(result)
     }
 
@@ -170,7 +168,6 @@ impl IdeaNoteOps for SqliteDb {
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("idea_note {id}")));
         }
-        self.trigger_snapshot();
         Ok(())
     }
 }

@@ -99,7 +99,6 @@ impl EntryOps for SqliteDb {
             .await?;
 
         let result = row_to_entry(&row)?;
-        self.trigger_snapshot();
         Ok(result)
     }
 
@@ -273,7 +272,6 @@ impl EntryOps for SqliteDb {
             .await?;
 
         let result = row_to_entry(&row)?;
-        self.trigger_snapshot();
         Ok(result)
     }
 
@@ -286,7 +284,6 @@ impl EntryOps for SqliteDb {
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("entry {id}")));
         }
-        self.trigger_snapshot();
         Ok(())
     }
 
@@ -325,7 +322,6 @@ impl EntryOps for SqliteDb {
         }
 
         tx.commit().await?;
-        self.trigger_snapshot();
         Ok(count)
     }
 }

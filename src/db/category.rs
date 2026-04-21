@@ -55,7 +55,6 @@ impl CategoryOps for SqliteDb {
         .fetch_one(&self.pool)
         .await?;
         let result = row_to_category(&row)?;
-        self.trigger_snapshot();
         Ok(result)
     }
 
@@ -82,7 +81,6 @@ impl CategoryOps for SqliteDb {
         }
 
         tx.commit().await?;
-        self.trigger_snapshot();
         Ok(categories)
     }
 
@@ -154,7 +152,6 @@ impl CategoryOps for SqliteDb {
             }
         };
         let result = row_to_category(&row)?;
-        self.trigger_snapshot();
         Ok(result)
     }
 
@@ -166,7 +163,6 @@ impl CategoryOps for SqliteDb {
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("category {id}")));
         }
-        self.trigger_snapshot();
         Ok(())
     }
 }

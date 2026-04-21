@@ -328,22 +328,21 @@ async fn test_restore_from_csvs_merge_mode() {
     assert_eq!(result.projects, 0);
 }
 
-// ─── 自动快照触发 ─────────────────────────────────────────────────────────────
+// ─── 自动快照触发（已禁用，快照只能手动触发）────────────────────────────────────
 
 #[tokio::test]
-async fn test_auto_snapshot_triggered_on_write() {
+async fn test_auto_snapshot_not_triggered_on_write() {
     let (db, _dir) = setup_with_snapshot().await;
 
-    // 写一条数据，自动触发快照
+    // 写一条数据，不应自动触发快照
     seed_project(&db, "自动快照项目").await;
 
     // fire-and-forget，给后台任务一点时间
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     let list = db.list_snapshots().await.unwrap();
-    assert!(!list.is_empty(), "auto-snapshot created after write");
     assert!(
-        list[0].message.starts_with("auto "),
-        "auto-snapshot message prefix"
+        list.is_empty(),
+        "auto-snapshot should not be created after write"
     );
 }

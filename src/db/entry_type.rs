@@ -42,7 +42,6 @@ impl EntryTypeOps for SqliteDb {
         .await?;
 
         let result = row_to_custom_entry_type(&row)?;
-        self.trigger_snapshot();
         Ok(result)
     }
 
@@ -72,7 +71,6 @@ impl EntryTypeOps for SqliteDb {
         }
 
         tx.commit().await?;
-        self.trigger_snapshot();
         Ok(entry_types)
     }
 
@@ -162,7 +160,6 @@ impl EntryTypeOps for SqliteDb {
         .await?;
 
         let result = row_to_custom_entry_type(&row)?;
-        self.trigger_snapshot();
         Ok(result)
     }
 
@@ -189,7 +186,6 @@ impl EntryTypeOps for SqliteDb {
             return Err(WorldflowError::NotFound(format!("entry_type {id}")));
         }
 
-        self.trigger_snapshot();
         Ok(())
     }
 
