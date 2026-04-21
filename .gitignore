@@ -6,3 +6,4 @@ worldflow_dev.db
 /.sqlx/
 /.claude/
 /.idea/
+/Cargo.lock
