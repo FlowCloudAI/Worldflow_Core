@@ -697,6 +697,12 @@ fn sync_git_create_branch(
     Ok(())
 }
 
+fn sync_git_set_head(dir: &Path, branch_name: &str) -> std::result::Result<(), git2::Error> {
+    let repo = Repository::open(dir)?;
+    repo.set_head(&format!("refs/heads/{branch_name}"))?;
+    Ok(())
+}
+
 fn sync_git_branch_exists(dir: &Path, branch_name: &str) -> std::result::Result<bool, git2::Error> {
     let repo = match Repository::open(dir) {
         Ok(r) => r,
@@ -795,6 +801,13 @@ async fn git_create_branch(
     .await
     .map_err(|e| WorldflowError::InvalidInput(format!("git task panicked: {e}")))?
     .map_err(WorldflowError::Git)
+}
+
+async fn git_set_head(dir: PathBuf, branch_name: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || sync_git_set_head(&dir, &branch_name))
+        .await
+        .map_err(|e| WorldflowError::InvalidInput(format!("git task panicked: {e}")))?
+        .map_err(WorldflowError::Git)
 }
 
 async fn git_branch_exists(dir: PathBuf, branch_name: String) -> Result<bool> {
@@ -1277,6 +1290,7 @@ impl SqliteDb {
         let bytes =
             git_read_all_from_branch(state.config.dir.clone(), branch_name.to_owned()).await?;
         apply_csv_bytes(&self.pool, bytes, RestoreMode::Replace).await?;
+        git_set_head(state.config.dir.clone(), branch_name.to_owned()).await?;
         persist_active_branch(&state.config.dir, branch_name)?;
         guard.active_branch = branch_name.to_owned();
         Ok(())
@@ -1449,6 +1463,11 @@ mod tests {
         let persisted = std::fs::read_to_string(snapshot_dir.join(ACTIVE_BRANCH_FILE))?;
         assert_eq!(persisted.trim(), "feature");
 
+        {
+            let repo = git2::Repository::open(&snapshot_dir)?;
+            assert_eq!(repo.head()?.shorthand(), Some("feature"));
+        }
+
         drop(db);
 
         let reopened = new_test_db(&database_url, &snapshot_dir).await?;
@@ -1476,10 +1495,18 @@ mod tests {
         db.switch_branch("main").await?;
         assert_eq!(db.active_branch().await?, "main");
         assert_eq!(get_project_name(&db, project_id).await?, "主线项目");
+        {
+            let repo = git2::Repository::open(&snapshot_dir)?;
+            assert_eq!(repo.head()?.shorthand(), Some("main"));
+        }
 
         db.switch_branch("feature").await?;
         assert_eq!(db.active_branch().await?, "feature");
         assert_eq!(get_project_name(&db, project_id).await?, "特性版本");
+        {
+            let repo = git2::Repository::open(&snapshot_dir)?;
+            assert_eq!(repo.head()?.shorthand(), Some("feature"));
+        }
         Ok(())
     }
 }
