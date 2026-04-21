@@ -28,6 +28,9 @@ pub enum WorldflowError {
 
     #[error("快照未配置")]
     SnapshotNotConfigured,
+
+    #[error("自上次快照以来没有任何变化")]
+    NoChanges,
 }
 
 pub type Result<T> = std::result::Result<T, WorldflowError>;

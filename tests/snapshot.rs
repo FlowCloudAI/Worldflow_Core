@@ -2,7 +2,7 @@ use std::env;
 use uuid::Uuid;
 use worldflow_core::{
     AppendResult, EntryOps, ProjectOps, RestoreMode, SnapshotConfig, SqliteDb,
-    models::{CreateEntry, CreateProject},
+    models::{CreateEntry, CreateProject, UpdateProject},
 };
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -185,12 +185,24 @@ async fn test_rollback_restores_to_snapshot_state() {
 async fn test_rollback_creates_pre_rollback_snapshot() {
     let (db, _dir) = setup_with_snapshot().await;
 
-    seed_project(&db, "原始项目").await;
+    let project = seed_project(&db, "原始项目").await;
     db.snapshot().await.unwrap();
 
     let snap_id = db.list_snapshots().await.unwrap()[0].id.clone();
 
-    // 回退前有 1 个快照，回退后应有 2 个（pre-rollback + 原来的）
+    // 先做一个未快照的修改，这样 rollback 时 pre-rollback 才有变化可保存
+    db.update_project(
+        &project.id,
+        UpdateProject {
+            name: Some("已修改".to_string()),
+            description: None,
+            cover_image: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // 回退后应有 2 个快照（pre-rollback + 原来的）
     db.rollback_to(&snap_id).await.unwrap();
 
     let list = db.list_snapshots().await.unwrap();

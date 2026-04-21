@@ -600,7 +600,7 @@ fn sync_git_commit_to_ref(
     author_name: &str,
     author_email: &str,
     update_ref: &str,
-) -> std::result::Result<(), git2::Error> {
+) -> std::result::Result<bool, git2::Error> {
     let repo = Repository::open(dir).or_else(|_| Repository::init(dir))?;
     let sig = Signature::now(author_name, author_email)?;
 
@@ -608,7 +608,6 @@ fn sync_git_commit_to_ref(
     index.add_all(["*.csv"].iter(), IndexAddOption::DEFAULT, None)?;
     index.write()?;
     let tree_id = index.write_tree()?;
-    let tree = repo.find_tree(tree_id)?;
 
     let parent_commits: Vec<git2::Commit<'_>> = match repo.revparse_single(update_ref) {
         Ok(obj) => vec![obj.peel_to_commit()?],
@@ -618,10 +617,18 @@ fn sync_git_commit_to_ref(
         },
         Err(_) => vec![],
     };
-    let parent_refs: Vec<&git2::Commit<'_>> = parent_commits.iter().collect();
 
+    // 空提交检测：如果新 tree 与父提交相同，说明没有任何变化
+    if let Some(parent) = parent_commits.first() {
+        if parent.tree_id() == tree_id {
+            return Ok(false);
+        }
+    }
+
+    let tree = repo.find_tree(tree_id)?;
+    let parent_refs: Vec<&git2::Commit<'_>> = parent_commits.iter().collect();
     repo.commit(Some(update_ref), &sig, &sig, message, &tree, &parent_refs)?;
-    Ok(())
+    Ok(true)
 }
 
 fn sync_git_list_ref(
@@ -759,7 +766,7 @@ async fn git_commit_snapshot_to_branch(
     author_name: String,
     author_email: String,
 ) -> Result<()> {
-    tokio::task::spawn_blocking(move || {
+    let committed = tokio::task::spawn_blocking(move || {
         sync_git_commit_to_ref(
             &dir,
             &message,
@@ -770,7 +777,12 @@ async fn git_commit_snapshot_to_branch(
     })
     .await
     .map_err(|e| WorldflowError::InvalidInput(format!("git task panicked: {e}")))?
-    .map_err(WorldflowError::Git)
+    .map_err(WorldflowError::Git)?;
+
+    if !committed {
+        return Err(WorldflowError::NoChanges);
+    }
+    Ok(())
 }
 
 async fn git_list_commits_in_branch(
@@ -1280,13 +1292,17 @@ impl SqliteDb {
                 "分支不存在: {branch_name}"
             )));
         }
-        do_snapshot_to_branch(
+        match do_snapshot_to_branch(
             &self.pool,
             &state.config,
             &guard.active_branch,
             &format!("pre-switch-to-{branch_name} {}", current_unix_secs()),
         )
-        .await?;
+        .await
+        {
+            Ok(()) | Err(WorldflowError::NoChanges) => {}
+            Err(e) => return Err(e),
+        }
         let bytes =
             git_read_all_from_branch(state.config.dir.clone(), branch_name.to_owned()).await?;
         apply_csv_bytes(&self.pool, bytes, RestoreMode::Replace).await?;
@@ -1321,13 +1337,17 @@ impl SqliteDb {
         // Hold lock for the entire operation: prevents auto-snapshots from
         // capturing a half-cleared database during the replace.
         let guard = state.lock.lock().await;
-        do_snapshot_to_branch(
+        match do_snapshot_to_branch(
             &self.pool,
             &state.config,
             &guard.active_branch,
             &format!("pre-rollback {}", current_unix_secs()),
         )
-        .await?;
+        .await
+        {
+            Ok(()) | Err(WorldflowError::NoChanges) => {}
+            Err(e) => return Err(e),
+        }
         let bytes =
             git_read_all_from_commit(state.config.dir.clone(), snapshot_id.to_owned()).await?;
         apply_csv_bytes(&self.pool, bytes, RestoreMode::Replace).await?;
@@ -1507,6 +1527,29 @@ mod tests {
             let repo = git2::Repository::open(&snapshot_dir)?;
             assert_eq!(repo.head()?.shorthand(), Some("feature"));
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn snapshot_no_changes_returns_no_changes() -> Result<()> {
+        let (_temp, database_url, snapshot_dir) = test_paths("snapshot_no_changes")?;
+        let db = new_test_db(&database_url, &snapshot_dir).await?;
+
+        insert_project(&db, "测试项目").await?;
+        db.snapshot_with_message("first").await?;
+
+        // 没有任何修改，再次快照应返回 NoChanges
+        let result = db.snapshot_with_message("second").await;
+        assert!(
+            matches!(result, Err(crate::error::WorldflowError::NoChanges)),
+            "expected NoChanges error, got {:?}",
+            result
+        );
+
+        // 确认分支上仍然只有 1 个提交
+        let snapshots = db.list_snapshots().await?;
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].message, "first");
         Ok(())
     }
 }
