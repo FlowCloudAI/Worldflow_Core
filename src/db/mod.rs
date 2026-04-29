@@ -1,3 +1,5 @@
+#[cfg(feature = "sqlite")]
+pub mod api_usage;
 pub mod traits;
 
 #[cfg(feature = "sqlite")]

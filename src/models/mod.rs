@@ -1,4 +1,5 @@
 // worldflow_core/src/models/mod.rs
+pub mod api_usage_log;
 pub mod category;
 pub mod entry;
 pub mod entry_link;
@@ -8,6 +9,7 @@ pub mod idea_note;
 pub mod project;
 pub mod tag_schema;
 
+pub use api_usage_log::*;
 pub use category::*;
 pub use entry::*;
 pub use entry_link::*;
