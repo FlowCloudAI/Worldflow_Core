@@ -549,11 +549,13 @@ SQLite 迁移文件：
 
 - [migrations/0001_init.sql](migrations/0001_init.sql)
 - [migrations/0002_entry_links.sql](migrations/0002_entry_links.sql)
+- [migrations/0003_idea_notes.sql](migrations/0003_idea_notes.sql)
 
 PostgreSQL 迁移文件：
 
 - [migrations_pg/0001_init.sql](migrations_pg/0001_init.sql)
 - [migrations_pg/0002_entry_links.sql](migrations_pg/0002_entry_links.sql)
+- [migrations_pg/0003_idea_notes.sql](migrations_pg/0003_idea_notes.sql)
 
 当前迁移已经包含：
 
@@ -563,6 +565,7 @@ PostgreSQL 迁移文件：
 - FTS/tsvector 相关结构
 - `entry_links` 表
 - `entry_types` 表
+- `idea_notes` 表
 
 你不需要手动先跑 `sqlx migrate run` 才能使用库，只要调用 `SqliteDb::new()` 或 `PgDb::new()`，库会自动执行迁移。
 
@@ -695,10 +698,11 @@ sqlx migrate run
 
 ## 当前测试现状
 
-仓库里有 4 个集成测试文件：
+仓库里有 5 个集成测试文件：
 
 - [tests/db.rs](tests/db.rs)
 - [tests/snapshot.rs](tests/snapshot.rs)
+- [tests/sqlite_uuid_storage.rs](tests/sqlite_uuid_storage.rs)
 - [tests/stress_test.rs](tests/stress_test.rs)
 - [tests/stress_test_pg.rs](tests/stress_test_pg.rs)
 
@@ -708,7 +712,7 @@ sqlx migrate run
 - `cargo check --lib --no-default-features --features postgres` 通过
 - `cargo test --lib` 通过
 - `cargo test --lib --no-default-features --features postgres` 通过
-- `cargo test --lib snapshot::tests` 通过（活动分支持久化、分支切换恢复数据库）
+- `cargo test --lib -- snapshot` 通过（活动分支持久化、分支切换恢复数据库）
 
 当前仓库的已知问题：
 

@@ -20,6 +20,10 @@ csv = "1"
 [dev-dependencies]
 tempfile = "3"
 
+[[test]]
+name = "average_stress_test"
+harness = false
+
 [features]
 default = ["sqlite"]
 sqlite   = ["sqlx/sqlite"]

@@ -289,8 +289,9 @@ async fn bench_sqlite_read_paths() {
         assert!(list.len() >= N_PROJECTS);
     }
     println!(
-        "[sqlite/read] list_projects x100: {}ms",
-        t1.elapsed().as_millis()
+        "[sqlite/read] list_projects x100: {}ms, 平均 {:.2}ms/次",
+        t1.elapsed().as_millis(),
+        t1.elapsed().as_millis() as f64 / 100.0,
     );
 
     let t2 = Instant::now();
@@ -300,10 +301,12 @@ async fn bench_sqlite_read_paths() {
             assert_eq!(cats.len(), N_CATEGORIES);
         }
     }
+    let n_list_cats = 50 * N_PROJECTS;
     println!(
-        "[sqlite/read] list_categories x{}: {}ms",
-        50 * N_PROJECTS,
-        t2.elapsed().as_millis()
+        "[sqlite/read] list_categories x{}: {}ms, 平均 {:.2}ms/次",
+        n_list_cats,
+        t2.elapsed().as_millis(),
+        t2.elapsed().as_millis() as f64 / n_list_cats as f64,
     );
 
     let t3 = Instant::now();
@@ -316,10 +319,12 @@ async fn bench_sqlite_read_paths() {
             assert_eq!(entries.len(), N_ENTRIES);
         }
     }
+    let n_list_entries = 20 * N_PROJECTS;
     println!(
-        "[sqlite/read] list_entries full x{}: {}ms",
-        20 * N_PROJECTS,
-        t3.elapsed().as_millis()
+        "[sqlite/read] list_entries full x{}: {}ms, 平均 {:.2}ms/次",
+        n_list_entries,
+        t3.elapsed().as_millis(),
+        t3.elapsed().as_millis() as f64 / n_list_entries as f64,
     );
 
     let t4 = Instant::now();
@@ -341,10 +346,12 @@ async fn bench_sqlite_read_paths() {
             }
         }
     }
+    let n_by_cat = 50 * N_PROJECTS;
     println!(
-        "[sqlite/read] list_entries by_category x{}: {}ms",
-        50 * N_PROJECTS,
-        t4.elapsed().as_millis()
+        "[sqlite/read] list_entries by_category x{}: {}ms, 平均 {:.2}ms/次",
+        n_by_cat,
+        t4.elapsed().as_millis(),
+        t4.elapsed().as_millis() as f64 / n_by_cat as f64,
     );
 
     let t5 = Instant::now();
@@ -358,8 +365,9 @@ async fn bench_sqlite_read_paths() {
         assert_eq!(fetched.id, entry.id);
     }
     println!(
-        "[sqlite/read] get_entry x200: {}ms",
-        t5.elapsed().as_millis()
+        "[sqlite/read] get_entry x200: {}ms, 平均 {:.2}ms/条",
+        t5.elapsed().as_millis(),
+        t5.elapsed().as_millis() as f64 / 200.0,
     );
 
     let sample = db
@@ -393,10 +401,12 @@ async fn bench_sqlite_search_paths() {
             assert!(!results.is_empty());
         }
     }
+    let n_sparse = 50 * N_PROJECTS;
     println!(
-        "[sqlite/search] sparse hit x{}: {}ms",
-        50 * N_PROJECTS,
-        t1.elapsed().as_millis()
+        "[sqlite/search] sparse hit x{}: {}ms, 平均 {:.2}ms/次",
+        n_sparse,
+        t1.elapsed().as_millis(),
+        t1.elapsed().as_millis() as f64 / n_sparse as f64,
     );
 
     // 稠密命中：性能压测，不断言结果非空。
@@ -413,10 +423,12 @@ async fn bench_sqlite_search_paths() {
                 .unwrap();
         }
     }
+    let n_dense = 5 * N_PROJECTS;
     println!(
-        "[sqlite/search] dense hit x{}: {}ms",
-        5 * N_PROJECTS,
-        t2.elapsed().as_millis()
+        "[sqlite/search] dense hit x{}: {}ms, 平均 {:.2}ms/次",
+        n_dense,
+        t2.elapsed().as_millis(),
+        t2.elapsed().as_millis() as f64 / n_dense as f64,
     );
 
     // miss
@@ -430,10 +442,12 @@ async fn bench_sqlite_search_paths() {
             assert!(results.is_empty());
         }
     }
+    let n_miss = 50 * N_PROJECTS;
     println!(
-        "[sqlite/search] miss x{}: {}ms",
-        50 * N_PROJECTS,
-        t3.elapsed().as_millis()
+        "[sqlite/search] miss x{}: {}ms, 平均 {:.2}ms/次",
+        n_miss,
+        t3.elapsed().as_millis(),
+        t3.elapsed().as_millis() as f64 / n_miss as f64,
     );
 
     cleanup_projects(&db, &data.project_ids).await;
@@ -457,10 +471,12 @@ async fn bench_sqlite_relation_paths() {
             let _ = db.list_relations_for_entry(entry_id).await.unwrap();
         }
     }
+    let n_list_rel_entry = 100 * data.relation_samples.len();
     println!(
-        "[sqlite/relation] list_relations_for_entry x{}: {}ms",
-        100 * data.relation_samples.len(),
-        t1.elapsed().as_millis()
+        "[sqlite/relation] list_relations_for_entry x{}: {}ms, 平均 {:.2}ms/次",
+        n_list_rel_entry,
+        t1.elapsed().as_millis(),
+        t1.elapsed().as_millis() as f64 / n_list_rel_entry as f64,
     );
 
     let t2 = Instant::now();
@@ -469,10 +485,12 @@ async fn bench_sqlite_relation_paths() {
             let _ = db.list_relations_for_project(pid).await.unwrap();
         }
     }
+    let n_list_rel_project = 50 * N_PROJECTS;
     println!(
-        "[sqlite/relation] list_relations_for_project x{}: {}ms",
-        50 * N_PROJECTS,
-        t2.elapsed().as_millis()
+        "[sqlite/relation] list_relations_for_project x{}: {}ms, 平均 {:.2}ms/次",
+        n_list_rel_project,
+        t2.elapsed().as_millis(),
+        t2.elapsed().as_millis() as f64 / n_list_rel_project as f64,
     );
 
     let t3 = Instant::now();
@@ -487,10 +505,12 @@ async fn bench_sqlite_relation_paths() {
         .await
         .unwrap();
     }
+    let n_update_rel = data.relation_samples.len();
     println!(
-        "[sqlite/relation] update_relation x{}: {}ms",
-        data.relation_samples.len(),
-        t3.elapsed().as_millis()
+        "[sqlite/relation] update_relation x{}: {}ms, 平均 {:.2}ms/条",
+        n_update_rel,
+        t3.elapsed().as_millis(),
+        t3.elapsed().as_millis() as f64 / n_update_rel as f64,
     );
 
     cleanup_projects(&db, &data.project_ids).await;
@@ -515,10 +535,12 @@ async fn bench_sqlite_entry_link_paths() {
             assert!(!outgoing.is_empty());
         }
     }
+    let n_out = 100 * data.link_samples.len();
     println!(
-        "[sqlite/link] list_outgoing_links x{}: {}ms",
-        100 * data.link_samples.len(),
-        t1.elapsed().as_millis()
+        "[sqlite/link] list_outgoing_links x{}: {}ms, 平均 {:.2}ms/次",
+        n_out,
+        t1.elapsed().as_millis(),
+        t1.elapsed().as_millis() as f64 / n_out as f64,
     );
 
     let t2 = Instant::now();
@@ -528,10 +550,12 @@ async fn bench_sqlite_entry_link_paths() {
             assert!(!incoming.is_empty());
         }
     }
+    let n_in = 100 * data.link_samples.len();
     println!(
-        "[sqlite/link] list_incoming_links x{}: {}ms",
-        100 * data.link_samples.len(),
-        t2.elapsed().as_millis()
+        "[sqlite/link] list_incoming_links x{}: {}ms, 平均 {:.2}ms/次",
+        n_in,
+        t2.elapsed().as_millis(),
+        t2.elapsed().as_millis() as f64 / n_in as f64,
     );
 
     let t3 = Instant::now();
@@ -555,9 +579,10 @@ async fn bench_sqlite_entry_link_paths() {
         }
     }
     println!(
-        "[sqlite/link] replace_outgoing_links x{}: {}ms",
+        "[sqlite/link] replace_outgoing_links x{}: {}ms, 平均 {:.2}ms/次",
         N_PROJECTS * N_LINKS,
-        t3.elapsed().as_millis()
+        t3.elapsed().as_millis(),
+        t3.elapsed().as_millis() as f64 / (N_PROJECTS * N_LINKS) as f64,
     );
 
     let t4 = Instant::now();
@@ -566,9 +591,10 @@ async fn bench_sqlite_entry_link_paths() {
         assert!(deleted > 0);
     }
     println!(
-        "[sqlite/link] delete_links_from_entry x{}: {}ms",
+        "[sqlite/link] delete_links_from_entry x{}: {}ms, 平均 {:.2}ms/次",
         (N_PROJECTS * N_LINKS) / 2,
-        t4.elapsed().as_millis()
+        t4.elapsed().as_millis(),
+        t4.elapsed().as_millis() as f64 / ((N_PROJECTS * N_LINKS) / 2) as f64,
     );
 
     cleanup_projects(&db, &data.project_ids).await;
@@ -612,10 +638,11 @@ async fn bench_sqlite_custom_entry_types() {
         type_ids.extend(custom_types.into_iter().map(|t| t.id));
     }
     println!(
-        "[sqlite/type] create {} projects with {} custom types each: {}ms",
+        "[sqlite/type] create {} projects with {} custom types each: {}ms, 平均 {:.2}ms/项目",
         T_PROJECTS,
         CUSTOM_TYPES_PER_PROJECT,
-        t_create.elapsed().as_millis()
+        t_create.elapsed().as_millis(),
+        t_create.elapsed().as_millis() as f64 / T_PROJECTS as f64,
     );
 
     let t_entries = Instant::now();
@@ -648,9 +675,10 @@ async fn bench_sqlite_custom_entry_types() {
         db.create_entries_bulk(bulk_inputs).await.unwrap();
     }
     println!(
-        "[sqlite/type] create {} entries with custom types: {}ms",
+        "[sqlite/type] create {} entries with custom types: {}ms, 平均 {:.2}ms/条",
         entry_count,
-        t_entries.elapsed().as_millis()
+        t_entries.elapsed().as_millis(),
+        t_entries.elapsed().as_millis() as f64 / entry_count as f64,
     );
 
     let t_filter = Instant::now();
@@ -673,10 +701,12 @@ async fn bench_sqlite_custom_entry_types() {
             filtered_count += entries.len();
         }
     }
+    let n_filter_types = T_PROJECTS * CUSTOM_TYPES_PER_PROJECT;
     println!(
-        "[sqlite/type] filter entries by {} custom types: {}ms (found {} entries)",
-        T_PROJECTS * CUSTOM_TYPES_PER_PROJECT,
+        "[sqlite/type] filter entries by {} custom types: {}ms, 平均 {:.2}ms/类型 (found {} entries)",
+        n_filter_types,
         t_filter.elapsed().as_millis(),
+        t_filter.elapsed().as_millis() as f64 / n_filter_types as f64,
         filtered_count
     );
 
@@ -685,10 +715,12 @@ async fn bench_sqlite_custom_entry_types() {
         let all_types = db.list_all_entry_types(pid).await.unwrap();
         assert_eq!(all_types.len(), 9 + CUSTOM_TYPES_PER_PROJECT);
     }
+    let n_list_types = project_ids.len();
     println!(
-        "[sqlite/type] list_all_entry_types x{}: {}ms",
-        project_ids.len(),
-        t_list_all.elapsed().as_millis()
+        "[sqlite/type] list_all_entry_types x{}: {}ms, 平均 {:.2}ms/次",
+        n_list_types,
+        t_list_all.elapsed().as_millis(),
+        t_list_all.elapsed().as_millis() as f64 / n_list_types as f64,
     );
 
     cleanup_projects(&db, &project_ids).await;
