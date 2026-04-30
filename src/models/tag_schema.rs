@@ -1,4 +1,4 @@
-// worldflow_core/src/models/tag_schema.rs
+// worldflow_core/src/models/tag_schema.rs——标签模式模型
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -18,7 +18,7 @@ pub struct TagSchema {
     pub description: Option<String>,
 
     /// 标签类型 (number | string | boolean)
-    pub r#type: String, // "number" | "string" | "boolean"
+    pub r#type: String, // 值类型："number" | "string" | "boolean"
 
     /// 标签目标对象
     pub target: String, // JSON数组原文，如 ["character", "item"]

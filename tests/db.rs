@@ -436,7 +436,7 @@ async fn test_entry_links_foreign_key_rejects_missing_target() {
     assert!(result.is_err(), "不存在的 b_id 应被外键拒绝");
 }
 
-// ======================== EntryType Tests ========================
+// ======================== 词条类型测试 ========================
 
 #[tokio::test]
 async fn test_builtin_entry_types_constant() {
@@ -1032,7 +1032,7 @@ async fn test_cascade_delete_on_project_delete() {
     );
 }
 
-// ======================== IdeaNote Tests ========================
+// ======================== 灵感笔记测试 ========================
 
 /// 辅助：创建测试便签
 async fn make_note(db: &SqliteDb, content: &str, project_id: Option<uuid::Uuid>) -> IdeaNote {

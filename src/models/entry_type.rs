@@ -82,7 +82,7 @@ pub const BUILTIN_ENTRY_TYPES: &[BuiltinEntryType] = &[
 /// 自定义词条类型
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct CustomEntryType {
-    pub id: Uuid, // UUID
+    pub id: Uuid, // UUID 标识
     pub project_id: Uuid,
     pub name: String,
     pub description: Option<String>,
@@ -221,7 +221,7 @@ mod tests {
     fn test_is_builtin_type_detection() {
         assert!(is_builtin_type("character"));
         assert!(is_builtin_type("organization"));
-        assert!(!is_builtin_type("018f0d4e-6b30-7c2a-9f65-8d7b3a1c2e4f")); // UUID
+        assert!(!is_builtin_type("018f0d4e-6b30-7c2a-9f65-8d7b3a1c2e4f")); // UUID 非内置类型
     }
 
     #[test]

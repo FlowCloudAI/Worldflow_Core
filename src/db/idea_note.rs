@@ -145,10 +145,10 @@ impl IdeaNoteOps for SqliteDb {
         .bind(input.status.as_ref().map(|s| s.as_str()))
         // pinned: COALESCE(新值, 原值)
         .bind(pinned_val)
-        // last_reviewed_at
+        // last_reviewed_at（上次回顾时间）
         .bind(input.last_reviewed_at.is_some())
         .bind(input.last_reviewed_at.flatten())
-        // converted_entry_id
+        // converted_entry_id（转换后的词条 ID）
         .bind(input.converted_entry_id.is_some())
         .bind(input.converted_entry_id.flatten())
         .bind(id)

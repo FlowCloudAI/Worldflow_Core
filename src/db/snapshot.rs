@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-// ═══════════════════════════════════════ Public types ════════════════════════════════════════════
+// ═══════════════════════════════════════ 公开类型 ═══════════════════════════════════════════════
 
 #[derive(Debug, Serialize)]
 pub struct SnapshotConfig {
@@ -48,7 +48,7 @@ pub enum RestoreMode {
     Merge,
 }
 
-// ═══════════════════════════════════════ Internal state ══════════════════════════════════════════
+// ═══════════════════════════════════════ 内部状态 ═══════════════════════════════════════════════
 
 #[derive(Debug)]
 pub(super) struct SnapshotState {
@@ -108,8 +108,8 @@ impl SnapshotState {
     }
 }
 
-// ═══════════════════════════════════════ CSV row structs ═════════════════════════════════════════
-// All fields are String. "" ↔ None conversion is done explicitly in import/export.
+// ═══════════════════════════════════════ CSV 行结构 ══════════════════════════════════════════════
+// 所有字段均为 String。"" ↔ None 的转换在导入/导出中显式处理。
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ProjectRow {
@@ -213,7 +213,7 @@ struct IdeaNoteRow {
     converted_entry_id: String,
 }
 
-// ═══════════════════════════════════════ Conversion helpers ══════════════════════════════════════
+// ═══════════════════════════════════════ 转换辅助 ═══════════════════════════════════════════════
 
 fn opt_str(s: &str) -> Option<String> {
     if s.is_empty() {
@@ -248,7 +248,7 @@ fn parse_opt_f64(s: &str) -> Result<Option<f64>> {
         .map_err(|e| WorldflowError::InvalidInput(format!("invalid float '{s}': {e}")))
 }
 
-// Parents must come before children; cycle guard handles corrupt data gracefully.
+// 父节点必须先于子节点出现；循环守卫可优雅处理损坏数据。
 fn sort_categories_topological(rows: Vec<CategoryRow>) -> Vec<CategoryRow> {
     let mut sorted: Vec<CategoryRow> = Vec::with_capacity(rows.len());
     let mut remaining = rows;
@@ -271,7 +271,7 @@ fn sort_categories_topological(rows: Vec<CategoryRow>) -> Vec<CategoryRow> {
     sorted
 }
 
-// ═══════════════════════════════════════ CSV I/O ═════════════════════════════════════════════════
+// ═══════════════════════════════════════ CSV 读写 ═══════════════════════════════════════════════
 
 fn write_csv_file<T: Serialize>(path: &Path, rows: &[T]) -> Result<()> {
     let mut wtr = csv::Writer::from_path(path)?;
@@ -288,7 +288,7 @@ fn parse_csv_bytes<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<Vec<T>>
     Ok(rows?)
 }
 
-// ═══════════════════════════════════════ Export ══════════════════════════════════════════════════
+// ═══════════════════════════════════════ 导出 ═══════════════════════════════════════════════════
 
 pub(super) async fn export_all(pool: &SqlitePool, dir: &Path) -> Result<()> {
     tokio::fs::create_dir_all(dir)
@@ -577,7 +577,7 @@ async fn export_idea_notes(pool: &SqlitePool, dir: &Path) -> Result<()> {
         .map_err(|e| WorldflowError::InvalidInput(format!("csv write task failed: {e}")))?
 }
 
-// ═══════════════════════════════════════ Git operations ══════════════════════════════════════════
+// ═══════════════════════════════════════ Git 操作 ═══════════════════════════════════════════════
 
 struct AllCsvBytes {
     projects: Vec<u8>,
@@ -853,7 +853,7 @@ async fn git_read_all_from_branch(dir: PathBuf, branch_name: String) -> Result<A
     .map_err(WorldflowError::Git)
 }
 
-// ═══════════════════════════════════════ Import / restore ════════════════════════════════════════
+// ═══════════════════════════════════════ 导入 / 恢复 ═══════════════════════════════════════════
 
 struct ParsedCsvData {
     projects: Vec<ProjectRow>,
@@ -887,7 +887,7 @@ async fn apply_csv_bytes(
     let parsed = parse_all_csv(&bytes)?;
 
     let mut conn = pool.acquire().await?;
-    // FK enforcement must be toggled outside a transaction in SQLite
+    // SQLite 中外键约束必须在事务外切换
     sqlx::query("PRAGMA foreign_keys = OFF")
         .execute(&mut *conn)
         .await?;
@@ -1178,7 +1178,7 @@ async fn insert_idea_notes(conn: &mut SqliteConnection, rows: &[IdeaNoteRow]) ->
     Ok(count)
 }
 
-// ═══════════════════════════════════════ Glue ════════════════════════════════════════════════════
+// ═══════════════════════════════════════ 胶水层 ═════════════════════════════════════════════════
 
 async fn do_snapshot_to_branch(
     pool: &SqlitePool,
@@ -1204,7 +1204,7 @@ fn current_unix_secs() -> u64 {
         .as_secs()
 }
 
-// ═══════════════════════════════════════ Public impl on SqliteDb ══════════════════════════════════
+// ═══════════════════════════════════════ SqliteDb 公开实现 ══════════════════════════════════════
 
 use crate::db::SqliteDb;
 
@@ -1334,8 +1334,7 @@ impl SqliteDb {
             .snapshot
             .as_ref()
             .ok_or(WorldflowError::SnapshotNotConfigured)?;
-        // Hold lock for the entire operation: prevents auto-snapshots from
-        // capturing a half-cleared database during the replace.
+        // 在整个操作期间持有锁：防止自动快照在替换过程中捕获半清空的数据库。
         let guard = state.lock.lock().await;
         match do_snapshot_to_branch(
             &self.pool,

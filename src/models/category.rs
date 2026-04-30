@@ -1,4 +1,4 @@
-// worldflow_core/src/models/category.rs
+// worldflow_core/src/models/category.rs——分类模型
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

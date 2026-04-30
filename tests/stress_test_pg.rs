@@ -154,7 +154,7 @@ async fn stress_write_and_query_pg() {
 
     // ── 关系写入 ──────────────────────────────────────────────
     let t_rel_write = Instant::now();
-    let mut relation_samples: Vec<(Uuid, Uuid)> = vec![]; // (entry_id, relation_id)
+    let mut relation_samples: Vec<(Uuid, Uuid)> = vec![]; // (词条 ID, 关系 ID)
 
     for pid in &project_ids {
         let entries = db
@@ -348,8 +348,8 @@ async fn stress_write_and_query_pg() {
                 content: Some("更新后的关系内容".to_string()),
             },
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
     }
     println!(
         "update_relation x{}: {:.2}ms",

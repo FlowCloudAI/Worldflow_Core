@@ -28,7 +28,7 @@
     <text x="60" y="110" class="field-text"><tspan class="pk">PK</tspan> id</text>
     <text x="60" y="125" class="field-text">name</text>
     <text x="60" y="140" class="field-text">description</text>
-    <text x="60" y="155" class="field-text">cover_path</text>
+      <text x="60" y="155" class="field-text">cover_image</text>
     <text x="60" y="170" class="field-text">created_at, updated_at</text>
     <text x="60" y="185" class="field-text">⏱ BEFORE UPDATE</text>
   </g>
@@ -81,7 +81,7 @@
 
   <!-- Entries 表 -->
   <g>
-    <rect x="50" y="290" width="260" height="190" class="table" rx="4"/>
+      <rect x="50" y="290" width="260" height="175" class="table" rx="4"/>
     <rect x="50" y="290" width="260" height="30" fill="#34495e"/>
     <text x="180" y="311" text-anchor="middle" class="table-name" fill="white">entries</text>
 
@@ -92,9 +92,8 @@
     <text x="60" y="390" class="field-text">content, type, tags</text>
     <text x="60" y="405" class="field-text">images, cover_path</text>
     <text x="60" y="420" class="field-text">created_at, updated_at</text>
-    <text x="60" y="435" class="field-text">created_at, updated_at</text>
-    <text x="60" y="450" class="field-text">⏱ BEFORE UPDATE</text>
-    <text x="60" y="465" class="label" style="font-size: 10px;">🔍 FTS (全文搜索)</text>
+      <text x="60" y="435" class="field-text">⏱ BEFORE UPDATE</text>
+      <text x="60" y="450" class="label" style="font-size: 10px;">🔍 FTS (全文搜索)</text>
   </g>
 
   <!-- Entry Relations 表 -->

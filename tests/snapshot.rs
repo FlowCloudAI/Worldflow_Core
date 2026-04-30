@@ -5,7 +5,7 @@ use worldflow_core::{
     models::{CreateEntry, CreateProject, UpdateProject},
 };
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
+// ─── 辅助函数 ───────────────────────────────────────────────────────────────
 
 async fn setup_with_snapshot() -> (SqliteDb, tempfile::TempDir) {
     let snap_dir = tempfile::tempdir().expect("tempdir");
@@ -126,7 +126,7 @@ async fn test_list_snapshots_grows_with_each_commit() {
         list.len() >= 2,
         "at least two snapshots after two manual commits"
     );
-    // newest first
+    // 最新的在前
     assert!(list[0].timestamp >= list[1].timestamp);
 }
 
@@ -154,7 +154,7 @@ async fn test_snapshot_not_configured_error() {
     assert!(db.append_from("abc").await.is_err());
 }
 
-// ─── rollback_to ─────────────────────────────────────────────────────────────
+// ─── rollback_to（回滚）─────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn test_rollback_restores_to_snapshot_state() {
@@ -213,7 +213,7 @@ async fn test_rollback_creates_pre_rollback_snapshot() {
     );
 }
 
-// ─── append_from ─────────────────────────────────────────────────────────────
+// ─── append_from（追加）─────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn test_append_from_restores_deleted_entries() {
@@ -279,7 +279,7 @@ async fn test_append_from_is_additive_not_destructive() {
     );
 }
 
-// ─── restore_from_csvs ────────────────────────────────────────────────────────
+// ─── restore_from_csvs（从 CSV 恢复）───────────────────────────────────────
 
 #[tokio::test]
 async fn test_restore_from_csvs_replace_mode() {

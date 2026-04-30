@@ -43,8 +43,8 @@ async fn cleanup_sqlite_file(path: std::path::PathBuf) {
 struct SeedData {
     project_ids: Vec<Uuid>,
     first_cat: HashMap<Uuid, Uuid>,
-    relation_samples: Vec<(Uuid, Uuid)>, // (entry_id, relation_id)
-    link_samples: Vec<(Uuid, Uuid)>,     // (source_entry_id, target_entry_id)
+    relation_samples: Vec<(Uuid, Uuid)>, // (词条 ID, 关系 ID)
+    link_samples: Vec<(Uuid, Uuid)>,     // (源词条 ID, 目标词条 ID)
 }
 
 async fn seed_base_data(db: &SqliteDb) -> SeedData {
@@ -431,7 +431,7 @@ async fn bench_sqlite_search_paths() {
         t2.elapsed().as_millis() as f64 / n_dense as f64,
     );
 
-    // miss
+    // 未命中（搜索不存在的内容）
     let t3 = Instant::now();
     for _ in 0..50 {
         for pid in &data.project_ids {

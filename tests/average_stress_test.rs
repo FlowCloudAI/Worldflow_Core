@@ -3,7 +3,7 @@ use std::env;
 use std::process::Command;
 
 // ---------------------------------------------------------------------------
-// Stats
+// 统计函数
 // ---------------------------------------------------------------------------
 
 fn compute_stats(samples: &[f64]) -> (f64, f64, f64, f64) {
@@ -16,36 +16,38 @@ fn compute_stats(samples: &[f64]) -> (f64, f64, f64, f64) {
 }
 
 // ---------------------------------------------------------------------------
-// Parse one output line → 0~2 (metric_name, value_ms) pairs
-//   - total time
-//   - per-item average (if present)
+// 解析一行输出 → 0~2 个 (metric_name, value_ms) 对
+//   - 总耗时
+//   - 平均每项耗时（如有）
 // ---------------------------------------------------------------------------
 
 fn parse_line(raw: &str) -> Vec<(String, f64)> {
-    // Harness may prepend "test xxx ... " before first println — find [sqlite/ wherever it is
+    // 测试框架可能在首次 println 前添加 "test xxx ... " 前缀——找到 [sqlite/ 位置
     let pos = match raw.find("[sqlite/") {
         Some(p) => p,
         None => return vec![],
     };
     let line = &raw[pos..];
 
-    // Skip info-only lines
+    // 跳过纯信息行
     if line.contains("seeded") || line.contains("cover 提取") {
         return vec![];
     }
 
     let mut results = Vec::new();
 
-    // --- extract total duration (ms) ---
+    // --- 提取总耗时（毫秒）---
     let total_ms = if line.contains("耗时") {
         // "耗时 X.XXs" → seconds → ms
-        line.split("耗时").nth(1)
+        line.split("耗时")
+            .nth(1)
             .and_then(|s| s.trim().split('s').next())
             .and_then(|s| s.trim().parse::<f64>().ok())
             .map(|secs| secs * 1000.0)
     } else if line.contains("ms,") {
         // "XXXms, 平均..." → first integer before "ms,"
-        line.split("ms,").next()
+        line.split("ms,")
+            .next()
             .and_then(|s| s.rsplit(char::is_whitespace).next())
             .and_then(|s| s.parse::<f64>().ok())
     } else {
@@ -57,7 +59,7 @@ fn parse_line(raw: &str) -> Vec<(String, f64)> {
         None => return vec![],
     };
 
-    // --- metric name: everything after [sqlite/...] up to ": " ---
+    // --- 指标名称：[sqlite/...] 之后到 ": " 之前的内容 ---
     let name = if let Some(idx) = line.find(": ") {
         line[..idx].to_string()
     } else {
@@ -79,14 +81,18 @@ fn parse_line(raw: &str) -> Vec<(String, f64)> {
 }
 
 // ---------------------------------------------------------------------------
-// Run cargo test once, return all parsed metrics
+// 运行 cargo test 一次，返回所有解析出的指标
 // ---------------------------------------------------------------------------
 
 fn run_stress_tests() -> HashMap<String, f64> {
     let output = Command::new("cargo")
         .args([
-            "test", "--test", "stress_test", "--",
-            "--nocapture", "--test-threads=1",
+            "test",
+            "--test",
+            "stress_test",
+            "--",
+            "--nocapture",
+            "--test-threads=1",
         ])
         .output()
         .expect("failed to run cargo test --test stress_test");
@@ -112,17 +118,25 @@ fn run_stress_tests() -> HashMap<String, f64> {
 }
 
 // ---------------------------------------------------------------------------
-// CLI
+// 命令行参数解析
 // ---------------------------------------------------------------------------
 
 fn parse_n_runs() -> usize {
     let args: Vec<String> = env::args().collect();
     for i in 0..args.len() {
         if args[i] == "--n" && i + 1 < args.len() {
-            if let Ok(n) = args[i + 1].parse() { if n > 0 { return n; } }
+            if let Ok(n) = args[i + 1].parse() {
+                if n > 0 {
+                    return n;
+                }
+            }
         }
         if args[i].starts_with("--n=") {
-            if let Ok(n) = args[i][4..].parse() { if n > 0 { return n; } }
+            if let Ok(n) = args[i][4..].parse() {
+                if n > 0 {
+                    return n;
+                }
+            }
         }
     }
     10
@@ -132,17 +146,25 @@ fn parse_cooldown() -> u64 {
     let args: Vec<String> = env::args().collect();
     for i in 0..args.len() {
         if (args[i] == "--cooldown" || args[i] == "-c") && i + 1 < args.len() {
-            if let Ok(s) = args[i + 1].parse() { if s > 0 { return s; } }
+            if let Ok(s) = args[i + 1].parse() {
+                if s > 0 {
+                    return s;
+                }
+            }
         }
         if args[i].starts_with("--cooldown=") {
-            if let Ok(s) = args[i][11..].parse() { if s > 0 { return s; } }
+            if let Ok(s) = args[i][11..].parse() {
+                if s > 0 {
+                    return s;
+                }
+            }
         }
     }
     10
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// 主入口
 // ---------------------------------------------------------------------------
 
 fn main() {
@@ -150,7 +172,7 @@ fn main() {
     let cooldown = parse_cooldown();
     eprintln!("Running stress_test {n_runs} times (cooldown {cooldown}s)...\n");
 
-    // metric_name → [durations across runs]
+    // 指标名称 → 各次运行的耗时列表
     let mut all_metrics: HashMap<String, Vec<f64>> = HashMap::new();
 
     for run in 1..=n_runs {
@@ -164,7 +186,7 @@ fn main() {
         }
     }
 
-    // Group by category
+    // 按分类分组
     let categories: &[&str] = &[
         "[sqlite/write]",
         "[sqlite/read]",
@@ -179,7 +201,9 @@ fn main() {
             .iter()
             .filter(|(name, _)| name.starts_with(*cat))
             .collect();
-        if entries.is_empty() { continue; }
+        if entries.is_empty() {
+            continue;
+        }
         entries.sort_by(|a, b| a.0.cmp(b.0));
 
         println!();
@@ -197,7 +221,11 @@ fn main() {
 
         for (name, samples) in &entries {
             let (avg, min, max, stddev) = compute_stats(samples);
-            let cv = if avg > 0.0 { (stddev / avg) * 100.0 } else { 0.0 };
+            let cv = if avg > 0.0 {
+                (stddev / avg) * 100.0
+            } else {
+                0.0
+            };
             let short = name.replacen(*cat, "", 1).trim().to_string();
             println!(
                 "  {:<60} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>9.1}%",
@@ -205,7 +233,7 @@ fn main() {
             );
         }
 
-        // Print raw data
+        // 打印原始数据
         println!();
         println!("  --- raw data (ms per run) ---");
         for (name, samples) in &entries {
