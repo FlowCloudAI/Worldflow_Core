@@ -150,46 +150,25 @@ impl EntryTypeOps for PgDb {
         // 先验证该类型是否存在
         self.get_entry_type(id).await?;
 
-        let mut p = 2usize;
-        let mut sql = "UPDATE entry_types SET ".to_string();
-        let mut set_clauses = vec![];
-
-        if input.name.is_some() {
-            set_clauses.push(format!("name = ${}", p));
-            p += 1;
-        }
-
-        if input.description.is_some() {
-            set_clauses.push(format!("description = ${}", p));
-            p += 1;
-        }
-
-        if input.icon.is_some() {
-            set_clauses.push(format!("icon = ${}", p));
-            p += 1;
-        }
-
-        if input.color.is_some() {
-            set_clauses.push(format!("color = ${}", p));
-            p += 1;
-        }
-
-        if set_clauses.is_empty() {
-            // 如果没有任何更新，直接返回原对象
-            return self.get_entry_type(id).await;
-        }
-
-        sql.push_str(&set_clauses.join(", "));
-        sql.push_str(&format!(" WHERE id = ${} RETURNING id, project_id, name, description, icon, color, created_at::TEXT, updated_at::TEXT", p));
-
-        let mut query = sqlx::query(&sql);
-        query = query.bind(&input.name);
-        query = query.bind(input.description.flatten());
-        query = query.bind(&input.icon);
-        query = query.bind(input.color.flatten());
-        query = query.bind(id);
-
-        let row = query.fetch_one(&self.pool).await?;
+        let row = sqlx::query(
+            "UPDATE entry_types
+             SET name        = COALESCE($1, name),
+                 description = CASE WHEN $2 THEN $3 ELSE description END,
+                 icon        = CASE WHEN $4 THEN $5 ELSE icon END,
+                 color       = CASE WHEN $6 THEN $7 ELSE color END
+             WHERE id = $8
+             RETURNING id, project_id, name, description, icon, color, created_at::TEXT, updated_at::TEXT",
+        )
+        .bind(&input.name)
+        .bind(input.description.is_some())
+        .bind(input.description.flatten())
+        .bind(input.icon.is_some())
+        .bind(input.icon.flatten())
+        .bind(input.color.is_some())
+        .bind(input.color.flatten())
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
 
         row_to_custom_entry_type(&row)
     }

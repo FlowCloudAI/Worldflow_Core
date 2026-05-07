@@ -33,7 +33,10 @@ impl IdeaNoteOps for PgDb {
             "INSERT INTO idea_notes (id, project_id, content, title, pinned)
              VALUES ($1, $2, $3, $4, $5)
              RETURNING id, project_id, content, title, status, pinned,
-                       created_at, updated_at, last_reviewed_at, converted_entry_id",
+                       created_at::TEXT AS created_at,
+                       updated_at::TEXT AS updated_at,
+                       last_reviewed_at::TEXT AS last_reviewed_at,
+                       converted_entry_id",
         )
         .bind(&id)
         .bind(&input.project_id)
@@ -49,7 +52,10 @@ impl IdeaNoteOps for PgDb {
     async fn get_idea_note(&self, id: &Uuid) -> Result<IdeaNote> {
         let row = sqlx::query(
             "SELECT id, project_id, content, title, status, pinned,
-                    created_at, updated_at, last_reviewed_at, converted_entry_id
+                    created_at::TEXT AS created_at,
+                    updated_at::TEXT AS updated_at,
+                    last_reviewed_at::TEXT AS last_reviewed_at,
+                    converted_entry_id
              FROM idea_notes WHERE id = $1",
         )
         .bind(id)
@@ -74,7 +80,10 @@ impl IdeaNoteOps for PgDb {
 
         let mut p = 1usize;
         let mut sql = "SELECT id, project_id, content, title, status, pinned, \
-                    created_at, updated_at, last_reviewed_at, converted_entry_id \
+                    created_at::TEXT AS created_at, \
+                    updated_at::TEXT AS updated_at, \
+                    last_reviewed_at::TEXT AS last_reviewed_at, \
+                    converted_entry_id \
              FROM idea_notes WHERE 1=1"
             .to_string();
 
@@ -119,66 +128,36 @@ impl IdeaNoteOps for PgDb {
     async fn update_idea_note(&self, id: &Uuid, input: UpdateIdeaNote) -> Result<IdeaNote> {
         self.get_idea_note(id).await?;
 
-        // 动态构建 SET 子句，只更新有值的字段
-        let mut sets: Vec<String> = Vec::new();
-        let mut p = 1usize;
-
-        if input.title.is_some() {
-            sets.push(format!("title = ${p}"));
-            p += 1;
-        }
-        if input.content.is_some() {
-            sets.push(format!("content = ${p}"));
-            p += 1;
-        }
-        if input.status.is_some() {
-            sets.push(format!("status = ${p}"));
-            p += 1;
-        }
-        if input.pinned.is_some() {
-            sets.push(format!("pinned = ${p}"));
-            p += 1;
-        }
-        if input.last_reviewed_at.is_some() {
-            sets.push(format!("last_reviewed_at = ${p}"));
-            p += 1;
-        }
-        if input.converted_entry_id.is_some() {
-            sets.push(format!("converted_entry_id = ${p}"));
-            p += 1;
-        }
-
-        if sets.is_empty() {
-            return self.get_idea_note(id).await;
-        }
-
-        let sql = format!(
-            "UPDATE idea_notes SET {} WHERE id = ${p} \
-             RETURNING id, project_id, content, title, status, pinned, \
-                       created_at, updated_at, last_reviewed_at, converted_entry_id",
-            sets.join(", ")
-        );
-
-        let mut q = sqlx::query(&sql);
-        if let Some(t) = input.title {
-            q = q.bind(t);
-        }
-        if let Some(c) = input.content {
-            q = q.bind(c);
-        }
-        if let Some(s) = input.status {
-            q = q.bind(s.as_str().to_owned());
-        }
-        if let Some(pv) = input.pinned {
-            q = q.bind(pv);
-        }
-        if let Some(lr) = input.last_reviewed_at {
-            q = q.bind(lr);
-        }
-        if let Some(ce) = input.converted_entry_id {
-            q = q.bind(ce);
-        }
-        let row = q.bind(id).fetch_one(&self.pool).await?;
+        let row = sqlx::query(
+            "UPDATE idea_notes
+             SET project_id         = CASE WHEN $1 THEN $2 ELSE project_id END,
+                 title              = CASE WHEN $3 THEN $4 ELSE title END,
+                 content            = COALESCE($5, content),
+                 status             = COALESCE($6, status),
+                 pinned             = COALESCE($7, pinned),
+                 last_reviewed_at   = CASE WHEN $8 THEN $9 ELSE last_reviewed_at END,
+                 converted_entry_id = CASE WHEN $10 THEN $11 ELSE converted_entry_id END
+             WHERE id = $12
+             RETURNING id, project_id, content, title, status, pinned,
+                       created_at::TEXT AS created_at,
+                       updated_at::TEXT AS updated_at,
+                       last_reviewed_at::TEXT AS last_reviewed_at,
+                       converted_entry_id",
+        )
+        .bind(input.project_id.is_some())
+        .bind(input.project_id.flatten())
+        .bind(input.title.is_some())
+        .bind(input.title.flatten())
+        .bind(&input.content)
+        .bind(input.status.as_ref().map(|s| s.as_str()))
+        .bind(input.pinned)
+        .bind(input.last_reviewed_at.is_some())
+        .bind(input.last_reviewed_at.flatten())
+        .bind(input.converted_entry_id.is_some())
+        .bind(input.converted_entry_id.flatten())
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
 
         row_to_idea_note(&row)
     }
