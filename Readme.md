@@ -85,7 +85,7 @@
 | 默认启用   | 是                                         | 否                                                                      |
 | 连接入口   | `SqliteDb::new()` / `new_with_snapshot()` | `PgDb::new()`                                                          |
 | 迁移目录   | `migrations/`                             | `migrations_pg/`                                                       |
-| 搜索实现   | FTS5 `trigram`，索引 `title + content`       | `to_tsvector('simple', title + summary + content)` + `plainto_tsquery` |
+| 搜索实现   | FTS5 `trigram`，索引 `title + summary + content`       | `to_tsvector('simple', title || summary || content)` + `plainto_tsquery` |
 | FTS 维护 | `optimize_fts()`                          | 无                                                                      |
 | 连接池上限  | 5                                         | 10                                                                     |
 | 版本快照   | 有（CSV + git2）                             | 无                                                                      |
@@ -297,7 +297,7 @@ pub struct CreateEntry {
 }
 ```
 
-### 2. `UpdateEntry.summary` 不能表达“清空为 NULL”
+### 2. `UpdateEntry.summary` 支持三态更新
 
 当前定义是：
 
@@ -305,7 +305,7 @@ pub struct CreateEntry {
 pub struct UpdateEntry {
     pub category_id: Option<Option<String>>,
     pub title: Option<String>,
-    pub summary: Option<String>,
+    pub summary: Option<Option<String>>,
     pub content: Option<String>,
     pub r#type: Option<Option<String>>,
     pub tags: Option<Vec<EntryTag>>,
@@ -316,10 +316,10 @@ pub struct UpdateEntry {
 这意味着：
 
 - `summary: None` 表示“不更新”
-- 没有 `Some(None)` 这种表达能力
-- 也就是说，当前 API 不能显式把 `summary` 清空成数据库 `NULL`
+- `Some(Some(text))` 表示更新为新值
+- `Some(None)` 表示显式清空为数据库 `NULL`
 
-### 3. `UpdateProject.cover_image` / `UpdateCategory.parent_id` / `UpdateEntry.category_id` / `UpdateEntry.r#type` 使用 `Option<Option<T>>`
+### 3. `UpdateProject.description` / `UpdateProject.cover_image` / `UpdateCategory.parent_id` / `UpdateEntry.category_id` / `UpdateEntry.summary` / `UpdateEntry.r#type` 使用 `Option<Option<T>>`
 
 这几个字段有三态语义：
 
@@ -501,8 +501,8 @@ SQLite 搜索实现：
 
 - 使用 FTS5 虚拟表 `entries_fts`
 - tokenizer 是 `trigram`
-- 当前索引字段是 `title + content`
-- `summary` 没进 SQLite FTS 索引
+- 当前索引字段是 `title + summary + content`
+- `summary` 已纳入 SQLite FTS 索引
 
 批量写入后可以手动做一次：
 
@@ -550,6 +550,8 @@ SQLite 迁移文件：
 - [migrations/0001_init.sql](migrations/0001_init.sql)
 - [migrations/0002_entry_links.sql](migrations/0002_entry_links.sql)
 - [migrations/0003_idea_notes.sql](migrations/0003_idea_notes.sql)
+- [migrations/0004_api_usage_log.sql](migrations/0004_api_usage_log.sql)
+- [migrations/0005_entries_fts_summary.sql](migrations/0005_entries_fts_summary.sql)
 
 PostgreSQL 迁移文件：
 
@@ -647,10 +649,9 @@ PostgreSQL 迁移文件：
 - SQLite 搜索在 [src/db/entry.rs](src/db/entry.rs)
 - PostgreSQL 搜索在 [src/db/pg_entry.rs](src/db/pg_entry.rs)
 
-这两套实现现在不是完全等价的，尤其是：
+这两套实现已对齐到同一检索范围：
 
-- SQLite 不搜 `summary`
-- PostgreSQL 搜 `summary`
+- SQLite/PG 都命中 `title + summary + content`
 - PostgreSQL 用 `plainto_tsquery`
 
 ---
