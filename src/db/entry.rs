@@ -246,7 +246,7 @@ impl EntryOps for SqliteDb {
         let row = sqlx::query(
             "UPDATE entries
          SET title       = COALESCE(?, title),
-             summary     = COALESCE(?, summary),
+             summary     = CASE WHEN ? THEN ? ELSE summary END,
              content     = COALESCE(?, content),
              category_id = CASE WHEN ? THEN ? ELSE category_id END,
              type        = CASE WHEN ? THEN ? ELSE type END,
@@ -257,7 +257,8 @@ impl EntryOps for SqliteDb {
          RETURNING id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at, updated_at"
         )
             .bind(&input.title)
-            .bind(&input.summary)
+            .bind(input.summary.is_some())
+            .bind(input.summary.flatten())
             .bind(&input.content)
             .bind(input.category_id.is_some())
             .bind(input.category_id.flatten())

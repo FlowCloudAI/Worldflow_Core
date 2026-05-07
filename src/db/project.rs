@@ -63,13 +63,14 @@ impl ProjectOps for SqliteDb {
         let row = sqlx::query(
             "UPDATE projects
              SET name        = COALESCE(?, name),
-                 description = COALESCE(?, description),
+                 description = CASE WHEN ? THEN ? ELSE description END,
                  cover_image = CASE WHEN ? THEN ? ELSE cover_image END
              WHERE id = ?
              RETURNING id, name, description, cover_image, created_at, updated_at",
         )
         .bind(&input.name)
-        .bind(&input.description)
+        .bind(input.description.is_some())
+        .bind(input.description.as_ref().and_then(|v| v.as_deref()))
         .bind(input.cover_image.is_some())
         .bind(input.cover_image.as_ref().and_then(|v| v.as_deref()))
         .bind(id)

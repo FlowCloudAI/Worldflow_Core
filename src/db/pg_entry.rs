@@ -214,18 +214,19 @@ impl EntryOps for PgDb {
         let row = sqlx::query(
             "UPDATE entries
              SET title       = COALESCE($1, title),
-                 summary     = COALESCE($2, summary),
-                 content     = COALESCE($3, content),
-                 category_id = CASE WHEN $4 THEN $5 ELSE category_id END,
-                 type        = CASE WHEN $6 THEN $7 ELSE type END,
-                 tags        = COALESCE($8, tags),
-                 images      = COALESCE($9, images),
-                 cover_path  = CASE WHEN $10 THEN $11 ELSE cover_path END
-             WHERE id = $12
-             RETURNING id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at::TEXT, updated_at::TEXT"
+                 summary     = CASE WHEN $2 THEN $3 ELSE summary END,
+                 content     = COALESCE($4, content),
+                 category_id = CASE WHEN $5 THEN $6 ELSE category_id END,
+                 type        = CASE WHEN $7 THEN $8 ELSE type END,
+                 tags        = COALESCE($9, tags),
+                 images      = COALESCE($10, images),
+                 cover_path  = CASE WHEN $11 THEN $12 ELSE cover_path END
+              WHERE id = $13
+              RETURNING id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at::TEXT, updated_at::TEXT"
         )
             .bind(&input.title)
-            .bind(&input.summary)
+            .bind(input.summary.is_some())
+            .bind(input.summary.flatten())
             .bind(&input.content)
             .bind(input.category_id.is_some())
             .bind(input.category_id.flatten())

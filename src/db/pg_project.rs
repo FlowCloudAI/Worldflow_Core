@@ -62,13 +62,14 @@ impl ProjectOps for PgDb {
         let row = sqlx::query(
             "UPDATE projects
              SET name        = COALESCE($1, name),
-                 description = COALESCE($2, description),
-                 cover_image = CASE WHEN $3 THEN $4 ELSE cover_image END
-             WHERE id = $5
-             RETURNING id, name, description, cover_image, created_at::TEXT, updated_at::TEXT",
+                 description = CASE WHEN $2 THEN $3 ELSE description END,
+                 cover_image = CASE WHEN $4 THEN $5 ELSE cover_image END
+              WHERE id = $6
+              RETURNING id, name, description, cover_image, created_at::TEXT, updated_at::TEXT",
         )
             .bind(&input.name)
-            .bind(&input.description)
+            .bind(input.description.is_some())
+            .bind(input.description.as_ref().and_then(|v| v.as_deref()))
             .bind(input.cover_image.is_some())
             .bind(input.cover_image.as_ref().and_then(|v| v.as_deref()))
             .bind(id)

@@ -48,6 +48,19 @@ async fn test_project_crud() {
     assert_eq!(updated.name, "改名后的世界观");
     assert_eq!(updated.description, Some("这是一个测试".to_string()));
 
+    let cleared = db
+        .update_project(
+            &project.id,
+            UpdateProject {
+                name: None,
+                description: Some(None),
+                cover_image: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(cleared.description, None);
+
     let list = db.list_projects().await.unwrap();
     assert!(list.iter().any(|p| p.id == project.id));
 
@@ -142,7 +155,7 @@ async fn test_entry_with_tags() {
             project_id: project.id.clone(),
             category_id: None,
             title: "艾莉丝".to_string(),
-            summary: None,
+            summary: Some("初始摘要".to_string()),
             content: Some("# 艾莉丝\n\n主角，魔法少女。".to_string()),
             r#type: Some("character".to_string()),
             tags: Some(vec![EntryTag {
@@ -195,6 +208,24 @@ async fn test_entry_with_tags() {
         .await
         .unwrap();
     assert_eq!(updated.tags.0[0].value, serde_json::json!(99));
+    assert_eq!(updated.summary, Some("初始摘要".to_string()));
+
+    let cleared = db
+        .update_entry(
+            &entry.id,
+            UpdateEntry {
+                title: None,
+                summary: Some(None),
+                content: None,
+                category_id: None,
+                r#type: None,
+                tags: None,
+                images: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(cleared.summary, None);
 
     db.delete_project(&project.id).await.unwrap();
 }

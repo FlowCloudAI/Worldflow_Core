@@ -66,7 +66,8 @@ pub struct EntryFilter<'a> {
 pub struct UpdateEntry {
     pub category_id: Option<Option<Uuid>>,
     pub title: Option<String>,
-    pub summary: Option<String>, // 新增
+    /// None = 不更新；Some(None) = 清空；Some(Some(s)) = 更新
+    pub summary: Option<Option<String>>,
     pub content: Option<String>,
     pub r#type: Option<Option<String>>,
     pub tags: Option<Vec<EntryTag>>,

@@ -36,6 +36,7 @@ pub struct CreateProject {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateProject {
     pub name: Option<String>,
-    pub description: Option<String>,
+    /// None = 不更新；Some(None) = 清空；Some(Some(s)) = 更新
+    pub description: Option<Option<String>>,
     pub cover_image: Option<Option<String>>,
 }
