@@ -102,6 +102,43 @@ async fn test_manual_snapshot_csv_contains_data() {
     assert!(entries_csv.contains("词条A"), "entry title in csv");
 }
 
+#[tokio::test]
+async fn test_snapshot_preserves_empty_optional_strings() {
+    let (db, snap_dir) = setup_with_snapshot().await;
+    let project = db
+        .create_project(CreateProject {
+            name: "空字符串测试".to_string(),
+            description: Some(String::new()),
+            cover_image: None,
+        })
+        .await
+        .unwrap();
+    let entry = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: None,
+            title: "空摘要词条".to_string(),
+            summary: Some(String::new()),
+            content: Some("内容".to_string()),
+            r#type: None,
+            tags: None,
+            images: None,
+        })
+        .await
+        .unwrap();
+
+    db.snapshot().await.unwrap();
+    db.delete_project(&project.id).await.unwrap();
+    db.restore_from_csvs(snap_dir.path(), RestoreMode::Replace)
+        .await
+        .unwrap();
+
+    let restored_project = db.get_project(&project.id).await.unwrap();
+    let restored_entry = db.get_entry(&entry.id).await.unwrap();
+    assert_eq!(restored_project.description, Some(String::new()));
+    assert_eq!(restored_entry.summary, Some(String::new()));
+}
+
 // ─── 版本列表 ─────────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -227,8 +264,6 @@ async fn test_append_from_restores_deleted_entries() {
 
     // 删掉词条
     db.delete_entry(&entry.id).await.unwrap();
-    // 等 auto-snapshot 完成（delete 触发了一个 fire-and-forget）
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     // 确认已删
     assert!(db.get_entry(&entry.id).await.is_err());
@@ -349,7 +384,7 @@ async fn test_auto_snapshot_not_triggered_on_write() {
     // 写一条数据，不应自动触发快照
     seed_project(&db, "自动快照项目").await;
 
-    // fire-and-forget，给后台任务一点时间
+    // 给潜在后台任务一点时间，确认写操作不会隐式提交快照
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     let list = db.list_snapshots().await.unwrap();

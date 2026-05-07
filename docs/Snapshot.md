@@ -23,14 +23,14 @@ author_email: "app@example.com".to_string(),
 
 ---
 
-## 自动快照
+## 手动快照
 
-每次写操作（create / update / delete）自动触发一次 fire-and-forget 异步快照，消息前缀为 `"auto <unix_secs>"`。
+Snapshot 只在显式调用 `snapshot()` / `snapshot_with_message()` / `snapshot_to_branch()` 时提交。
 
 - 内部用 `Mutex` 串行化，不会并发提交
-- 失败只打印到 stderr，不传播给调用方
-- 自动快照始终提交到当前活动分支
-- 高频写入会积累大量提交；批量导入场景建议用 `SqliteDb::new()` 导入完再手动调一次 `snapshot()`
+- 写操作不会自动创建快照
+- `snapshot()` 默认消息前缀为 `"manual <unix_secs>"`
+- 批量导入场景建议用 `SqliteDb::new()` 导入完再手动调一次 `snapshot()`
 
 ---
 
@@ -38,7 +38,7 @@ author_email: "app@example.com".to_string(),
 
 Snapshot 支持应用层“活动分支”概念：
 
-- `snapshot()` / `snapshot_with_message()` / 自动快照 / `rollback_to()` 前保护快照，都会提交到活动分支
+- `snapshot()` / `snapshot_with_message()` / `rollback_to()` 前保护快照，都会提交到活动分支
 - `list_snapshots()` 默认只查看活动分支历史
 - `switch_branch()` 会把数据库恢复到目标分支 tip，然后把活动分支切过去
 
@@ -118,7 +118,7 @@ projects.csv  categories.csv  tag_schemas.csv  entry_types.csv
 entries.csv   entry_relations.csv  entry_links.csv  idea_notes.csv
 ```
 
-所有字段均为字符串；UUID 存连字符格式；可选字段为空字符串表示 NULL。
+所有字段均为字符串；UUID 存连字符格式。可选字符串字段使用 JSON 标量编码：`null` 表示 NULL，`""` 表示真实空字符串，`"文本"` 表示普通字符串。可选 UUID / 数字字段仍以空字符串表示 NULL。
 
 ---
 
@@ -126,7 +126,7 @@ entries.csv   entry_relations.csv  entry_links.csv  idea_notes.csv
 
 | 场景                     | 行为                                                    |
 |------------------------|-------------------------------------------------------|
-| `rollback_to` 期间       | 持有锁全程，阻断自动快照插入中间状态                                    |
+| `rollback_to` 期间       | 持有锁全程，避免分支切换或回滚交错写入半清空的数据库                            |
 | `RestoreMode::Replace` | `PRAGMA foreign_keys = OFF` + 手动事务；依赖顺序删除 8 张表        |
 | `RestoreMode::Merge`   | `INSERT OR IGNORE`，不删除现有记录                            |
 | 分类插入顺序                 | 拓扑排序，父分类先于子分类，防止 FK 违反                                |

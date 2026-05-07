@@ -65,9 +65,7 @@ impl TagSchemaOps for SqliteDb {
             .fetch_one(&self.pool)
             .await?;
 
-        let result = row_to_tag_schema(&row)?;
-        self.trigger_snapshot();
-        Ok(result)
+        row_to_tag_schema(&row)
     }
 
     async fn create_tag_schemas_bulk(
@@ -120,7 +118,6 @@ impl TagSchemaOps for SqliteDb {
         }
 
         tx.commit().await?;
-        self.trigger_snapshot();
         Ok(schemas)
     }
 
@@ -183,9 +180,7 @@ impl TagSchemaOps for SqliteDb {
         .fetch_one(&self.pool)
         .await?;
 
-        let result = row_to_tag_schema(&row)?;
-        self.trigger_snapshot();
-        Ok(result)
+        row_to_tag_schema(&row)
     }
 
     async fn delete_tag_schema(&self, id: &Uuid) -> Result<()> {
@@ -197,7 +192,6 @@ impl TagSchemaOps for SqliteDb {
         if result.rows_affected() == 0 {
             return Err(WorldflowError::NotFound(format!("tag_schema {id}")));
         }
-        self.trigger_snapshot();
         Ok(())
     }
 }

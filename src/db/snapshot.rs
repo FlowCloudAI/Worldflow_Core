@@ -1,5 +1,5 @@
 use crate::error::{Result, WorldflowError};
-use git2::{BranchType, IndexAddOption, Repository, Signature, Sort};
+use git2::{BranchType, ErrorCode, IndexAddOption, Repository, Signature, Sort};
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqliteConnection, SqlitePool};
 use std::path::{Path, PathBuf};
@@ -67,14 +67,18 @@ fn active_branch_file(dir: &Path) -> PathBuf {
     dir.join(ACTIVE_BRANCH_FILE)
 }
 
-fn load_persisted_active_branch(dir: &Path) -> Option<String> {
+fn load_persisted_active_branch(dir: &Path) -> Result<Option<String>> {
     let path = active_branch_file(dir);
-    let branch = std::fs::read_to_string(path).ok()?;
+    let branch = match std::fs::read_to_string(path) {
+        Ok(branch) => branch,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(WorldflowError::Io(e)),
+    };
     let branch = branch.trim();
     if branch.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(branch.to_owned())
+        Ok(Some(branch.to_owned()))
     }
 }
 
@@ -84,27 +88,35 @@ fn persist_active_branch(dir: &Path, branch_name: &str) -> Result<()> {
     Ok(())
 }
 
-fn detect_active_branch(dir: &Path) -> String {
-    if let Some(branch) = load_persisted_active_branch(dir) {
-        return branch;
+fn detect_active_branch(dir: &Path) -> Result<String> {
+    if let Some(branch) = load_persisted_active_branch(dir)? {
+        return Ok(branch);
     }
-    let Ok(repo) = Repository::open(dir) else {
-        return "main".to_owned();
+    let repo = match Repository::open(dir) {
+        Ok(repo) => repo,
+        Err(e) if e.code() == ErrorCode::NotFound => return Ok("main".to_owned()),
+        Err(e) => return Err(WorldflowError::Git(e)),
     };
-    let Ok(head) = repo.head() else {
-        return "main".to_owned();
+    let head = match repo.head() {
+        Ok(head) => head,
+        Err(e) if matches!(e.code(), ErrorCode::NotFound | ErrorCode::UnbornBranch) => {
+            return Ok("main".to_owned());
+        }
+        Err(e) => return Err(WorldflowError::Git(e)),
     };
-    head.shorthand().unwrap_or("main").to_owned()
+    head.shorthand()
+        .map(str::to_owned)
+        .ok_or_else(|| WorldflowError::InvalidInput("无法识别活动快照分支".to_owned()))
 }
 
 impl SnapshotState {
-    pub fn new(config: SnapshotConfig) -> Self {
-        let active_branch = detect_active_branch(&config.dir);
-        let _ = persist_active_branch(&config.dir, &active_branch);
-        Self {
+    pub fn new(config: SnapshotConfig) -> Result<Self> {
+        let active_branch = detect_active_branch(&config.dir)?;
+        persist_active_branch(&config.dir, &active_branch)?;
+        Ok(Self {
             lock: Mutex::new(SnapshotRuntimeState { active_branch }),
             config,
-        }
+        })
     }
 }
 
@@ -215,11 +227,20 @@ struct IdeaNoteRow {
 
 // ═══════════════════════════════════════ 转换辅助 ═══════════════════════════════════════════════
 
-fn opt_str(s: &str) -> Option<String> {
+fn encode_opt_str(s: Option<String>) -> Result<String> {
+    serde_json::to_string(&s).map_err(WorldflowError::Serialization)
+}
+
+fn opt_str(s: &str) -> Result<Option<String>> {
+    let trimmed = s.trim();
+    if trimmed == "null" || trimmed.starts_with('"') {
+        return serde_json::from_str::<Option<String>>(trimmed)
+            .map_err(WorldflowError::Serialization);
+    }
     if s.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(s.to_owned())
+        Ok(Some(s.to_owned()))
     }
 }
 
@@ -318,12 +339,8 @@ async fn export_projects(pool: &SqlitePool, dir: &Path) -> Result<()> {
         csv_rows.push(ProjectRow {
             id: row.try_get::<Uuid, _>("id")?.to_string(),
             name: row.try_get("name")?,
-            description: row
-                .try_get::<Option<String>, _>("description")?
-                .unwrap_or_default(),
-            cover_image: row
-                .try_get::<Option<String>, _>("cover_image")?
-                .unwrap_or_default(),
+            description: encode_opt_str(row.try_get::<Option<String>, _>("description")?)?,
+            cover_image: encode_opt_str(row.try_get::<Option<String>, _>("cover_image")?)?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         });
@@ -380,14 +397,10 @@ async fn export_tag_schemas(pool: &SqlitePool, dir: &Path) -> Result<()> {
             id: row.try_get::<Uuid, _>("id")?.to_string(),
             project_id: row.try_get::<Uuid, _>("project_id")?.to_string(),
             name: row.try_get("name")?,
-            description: row
-                .try_get::<Option<String>, _>("description")?
-                .unwrap_or_default(),
+            description: encode_opt_str(row.try_get::<Option<String>, _>("description")?)?,
             type_: row.try_get("type")?,
             target: row.try_get("target")?,
-            default_val: row
-                .try_get::<Option<String>, _>("default_val")?
-                .unwrap_or_default(),
+            default_val: encode_opt_str(row.try_get::<Option<String>, _>("default_val")?)?,
             range_min: row
                 .try_get::<Option<f64>, _>("range_min")?
                 .map(|v| v.to_string())
@@ -422,15 +435,9 @@ async fn export_entry_types(pool: &SqlitePool, dir: &Path) -> Result<()> {
             id: row.try_get::<Uuid, _>("id")?.to_string(),
             project_id: row.try_get::<Uuid, _>("project_id")?.to_string(),
             name: row.try_get("name")?,
-            description: row
-                .try_get::<Option<String>, _>("description")?
-                .unwrap_or_default(),
-            icon: row
-                .try_get::<Option<String>, _>("icon")?
-                .unwrap_or_default(),
-            color: row
-                .try_get::<Option<String>, _>("color")?
-                .unwrap_or_default(),
+            description: encode_opt_str(row.try_get::<Option<String>, _>("description")?)?,
+            icon: encode_opt_str(row.try_get::<Option<String>, _>("icon")?)?,
+            color: encode_opt_str(row.try_get::<Option<String>, _>("color")?)?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         });
@@ -461,18 +468,12 @@ async fn export_entries(pool: &SqlitePool, dir: &Path) -> Result<()> {
                 .map(|u| u.to_string())
                 .unwrap_or_default(),
             title: row.try_get("title")?,
-            summary: row
-                .try_get::<Option<String>, _>("summary")?
-                .unwrap_or_default(),
+            summary: encode_opt_str(row.try_get::<Option<String>, _>("summary")?)?,
             content: row.try_get("content")?,
-            type_: row
-                .try_get::<Option<String>, _>("type")?
-                .unwrap_or_default(),
+            type_: encode_opt_str(row.try_get::<Option<String>, _>("type")?)?,
             tags: row.try_get("tags")?,
             images: row.try_get("images")?,
-            cover_path: row
-                .try_get::<Option<String>, _>("cover_path")?
-                .unwrap_or_default(),
+            cover_path: encode_opt_str(row.try_get::<Option<String>, _>("cover_path")?)?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         });
@@ -554,16 +555,12 @@ async fn export_idea_notes(pool: &SqlitePool, dir: &Path) -> Result<()> {
                 .map(|u| u.to_string())
                 .unwrap_or_default(),
             content: row.try_get("content")?,
-            title: row
-                .try_get::<Option<String>, _>("title")?
-                .unwrap_or_default(),
+            title: encode_opt_str(row.try_get::<Option<String>, _>("title")?)?,
             status: row.try_get("status")?,
             pinned: row.try_get::<i64, _>("pinned")?.to_string(),
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
-            last_reviewed_at: row
-                .try_get::<Option<String>, _>("last_reviewed_at")?
-                .unwrap_or_default(),
+            last_reviewed_at: encode_opt_str(row.try_get::<Option<String>, _>("last_reviewed_at")?)?,
             converted_entry_id: row
                 .try_get::<Option<Uuid>, _>("converted_entry_id")?
                 .map(|u| u.to_string())
@@ -960,8 +957,8 @@ async fn insert_projects(conn: &mut SqliteConnection, rows: &[ProjectRow]) -> Re
         )
         .bind(&id)
         .bind(&row.name)
-        .bind(opt_str(&row.description))
-        .bind(opt_str(&row.cover_image))
+        .bind(opt_str(&row.description)?)
+        .bind(opt_str(&row.cover_image)?)
         .bind(&row.created_at)
         .bind(&row.updated_at)
         .execute(&mut *conn)
@@ -1016,10 +1013,10 @@ async fn insert_tag_schemas(conn: &mut SqliteConnection, rows: &[TagSchemaRow]) 
         .bind(&id)
         .bind(&project_id)
         .bind(&row.name)
-        .bind(opt_str(&row.description))
+        .bind(opt_str(&row.description)?)
         .bind(&row.type_)
         .bind(&row.target)
-        .bind(opt_str(&row.default_val))
+        .bind(opt_str(&row.default_val)?)
         .bind(range_min)
         .bind(range_max)
         .bind(sort_order)
@@ -1046,9 +1043,9 @@ async fn insert_entry_types(conn: &mut SqliteConnection, rows: &[EntryTypeRow]) 
         .bind(&id)
         .bind(&project_id)
         .bind(&row.name)
-        .bind(opt_str(&row.description))
-        .bind(opt_str(&row.icon))
-        .bind(opt_str(&row.color))
+        .bind(opt_str(&row.description)?)
+        .bind(opt_str(&row.icon)?)
+        .bind(opt_str(&row.color)?)
         .bind(&row.created_at)
         .bind(&row.updated_at)
         .execute(&mut *conn)
@@ -1075,12 +1072,12 @@ async fn insert_entries(conn: &mut SqliteConnection, rows: &[EntryRow]) -> Resul
         .bind(&project_id)
         .bind(category_id)
         .bind(&row.title)
-        .bind(opt_str(&row.summary))
+        .bind(opt_str(&row.summary)?)
         .bind(&row.content)
-        .bind(opt_str(&row.type_))
+        .bind(opt_str(&row.type_)?)
         .bind(&row.tags)
         .bind(&row.images)
-        .bind(opt_str(&row.cover_path))
+        .bind(opt_str(&row.cover_path)?)
         .bind(&row.created_at)
         .bind(&row.updated_at)
         .execute(&mut *conn)
@@ -1163,12 +1160,12 @@ async fn insert_idea_notes(conn: &mut SqliteConnection, rows: &[IdeaNoteRow]) ->
         .bind(&id)
         .bind(project_id)
         .bind(&row.content)
-        .bind(opt_str(&row.title))
+        .bind(opt_str(&row.title)?)
         .bind(&row.status)
         .bind(pinned)
         .bind(&row.created_at)
         .bind(&row.updated_at)
-        .bind(opt_str(&row.last_reviewed_at))
+        .bind(opt_str(&row.last_reviewed_at)?)
         .bind(converted_entry_id)
         .execute(&mut *conn)
         .await?
@@ -1334,7 +1331,7 @@ impl SqliteDb {
             .snapshot
             .as_ref()
             .ok_or(WorldflowError::SnapshotNotConfigured)?;
-        // 在整个操作期间持有锁：防止自动快照在替换过程中捕获半清空的数据库。
+        // 在整个操作期间持有锁，避免分支切换或回滚交错写入半清空的数据库。
         let guard = state.lock.lock().await;
         match do_snapshot_to_branch(
             &self.pool,
@@ -1378,26 +1375,6 @@ impl SqliteDb {
             idea_notes: read_file("idea_notes.csv")?,
         };
         apply_csv_bytes(&self.pool, bytes, mode).await
-    }
-
-    pub(crate) fn trigger_snapshot(&self) {
-        let Some(state) = self.snapshot.clone() else {
-            return;
-        };
-        let pool = self.pool.clone();
-        tokio::spawn(async move {
-            let guard = state.lock.lock().await;
-            if let Err(e) = do_snapshot_to_branch(
-                &pool,
-                &state.config,
-                &guard.active_branch,
-                &format!("auto {}", current_unix_secs()),
-            )
-            .await
-            {
-                eprintln!("[worldflow] snapshot error: {e}");
-            }
-        });
     }
 }
 

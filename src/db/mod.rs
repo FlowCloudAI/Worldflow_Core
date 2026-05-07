@@ -85,7 +85,7 @@ impl SqliteDb {
         let db = Self::new(database_url).await?;
         Ok(Self {
             pool: db.pool,
-            snapshot: Some(Arc::new(SnapshotState::new(config))),
+            snapshot: Some(Arc::new(SnapshotState::new(config)?)),
         })
     }
 
