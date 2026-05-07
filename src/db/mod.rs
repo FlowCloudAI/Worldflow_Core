@@ -24,6 +24,7 @@ mod idea_note;
 #[cfg(feature = "sqlite")]
 mod project;
 #[cfg(feature = "sqlite")]
+#[cfg(feature = "snapshot")]
 pub(crate) mod snapshot;
 #[cfg(feature = "sqlite")]
 mod tag_schema;
@@ -37,10 +38,10 @@ use sysinfo::System;
 #[cfg(feature = "sqlite")]
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 
-#[cfg(feature = "sqlite")]
+#[cfg(all(feature = "sqlite", feature = "snapshot"))]
 use std::sync::Arc;
 
-#[cfg(feature = "sqlite")]
+#[cfg(all(feature = "sqlite", feature = "snapshot"))]
 use snapshot::{SnapshotConfig, SnapshotState};
 
 /// 进程启动时探测一次可用内存，后续所有连接复用同一档位。
@@ -85,6 +86,7 @@ pub(in crate::db) fn map_row_not_found(
 #[derive(Clone, Debug)]
 pub struct SqliteDb {
     pub pool: SqlitePool,
+    #[cfg(feature = "snapshot")]
     pub(in crate::db) snapshot: Option<Arc<SnapshotState>>,
 }
 
@@ -113,14 +115,17 @@ impl SqliteDb {
 
         Ok(Self {
             pool,
+            #[cfg(feature = "snapshot")]
             snapshot: None,
         })
     }
 
+    #[cfg(feature = "snapshot")]
     pub async fn new_with_snapshot(database_url: &str, config: SnapshotConfig) -> Result<Self> {
         let db = Self::new(database_url).await?;
         Ok(Self {
             pool: db.pool,
+            #[cfg(feature = "snapshot")]
             snapshot: Some(Arc::new(SnapshotState::new(config)?)),
         })
     }

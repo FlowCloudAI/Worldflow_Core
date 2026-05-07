@@ -20,6 +20,7 @@ pub enum WorldflowError {
     #[error("IO 错误: {0}")]
     Io(#[from] std::io::Error),
 
+    #[cfg(feature = "snapshot")]
     #[error("Git 错误: {0}")]
     Git(#[from] git2::Error),
 
