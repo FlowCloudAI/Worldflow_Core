@@ -77,6 +77,7 @@ impl IdeaNoteOps for PgDb {
                 "only_global 与 project_id 不能同时使用".to_string(),
             ));
         }
+        let (limit, offset) = super::checked_pagination(limit, offset)?;
 
         let mut p = 1usize;
         let mut sql = "SELECT id, project_id, content, title, status, pinned, \
@@ -117,8 +118,8 @@ impl IdeaNoteOps for PgDb {
             q = q.bind(pv);
         }
         let rows = q
-            .bind(limit as i64)
-            .bind(offset as i64)
+            .bind(limit)
+            .bind(offset)
             .fetch_all(&self.pool)
             .await?;
 
@@ -157,7 +158,8 @@ impl IdeaNoteOps for PgDb {
         .bind(input.converted_entry_id.flatten())
         .bind(id)
         .fetch_one(&self.pool)
-        .await?;
+        .await
+        .map_err(|e| super::map_row_not_found(e, format!("idea_note {id}")))?;
 
         row_to_idea_note(&row)
     }

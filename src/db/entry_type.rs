@@ -157,7 +157,8 @@ impl EntryTypeOps for SqliteDb {
         .bind(input.color.flatten())
         .bind(id)
         .fetch_one(&self.pool)
-        .await?;
+        .await
+        .map_err(|e| super::map_row_not_found(e, format!("entry_type {id}")))?;
 
         let result = row_to_custom_entry_type(&row)?;
         Ok(result)

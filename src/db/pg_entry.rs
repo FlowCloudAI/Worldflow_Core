@@ -2,11 +2,33 @@ use super::traits::EntryOps;
 use crate::{
     db::PgDb,
     error::{Result, WorldflowError},
-    models::{CreateEntry, Entry, EntryBrief, EntryFilter, UpdateEntry},
+    models::{CreateEntry, Entry, EntryBrief, EntryFilter, UpdateEntry, validate_builtin_type_key},
 };
 use sqlx::Row;
 use std::path::PathBuf;
 use uuid::Uuid;
+
+async fn validate_entry_type(db: &PgDb, project_id: &Uuid, typ: Option<&str>) -> Result<()> {
+    let Some(typ) = typ else {
+        return Ok(());
+    };
+    let Ok(type_id) = Uuid::parse_str(typ) else {
+        return validate_builtin_type_key(typ);
+    };
+    let row =
+        sqlx::query("SELECT COUNT(*) as cnt FROM entry_types WHERE id = $1 AND project_id = $2")
+            .bind(type_id)
+            .bind(project_id)
+            .fetch_one(&db.pool)
+            .await?;
+    let cnt: i64 = row.try_get("cnt")?;
+    if cnt == 0 {
+        return Err(WorldflowError::InvalidInput(
+            "自定义词条类型不存在或不属于当前项目".to_string(),
+        ));
+    }
+    Ok(())
+}
 
 fn row_to_entry(row: &sqlx::postgres::PgRow) -> Result<Entry> {
     let tags_str: String = row.try_get("tags")?;
@@ -66,6 +88,8 @@ impl EntryOps for PgDb {
     }
 
     async fn create_entry(&self, input: CreateEntry) -> Result<Entry> {
+        validate_entry_type(self, &input.project_id, input.r#type.as_deref()).await?;
+
         let id = Uuid::now_v7();
         let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
         let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;
@@ -116,6 +140,7 @@ impl EntryOps for PgDb {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<EntryBrief>> {
+        let (limit, offset) = super::checked_pagination(limit, offset)?;
         let mut p = 2usize;
         let mut sql =
             "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at::TEXT
@@ -142,8 +167,8 @@ impl EntryOps for PgDb {
             q = q.bind(t);
         }
         let rows = q
-            .bind(limit as i64)
-            .bind(offset as i64)
+            .bind(limit)
+            .bind(offset)
             .fetch_all(&self.pool)
             .await?;
 
@@ -158,7 +183,8 @@ impl EntryOps for PgDb {
         limit: usize,
     ) -> Result<Vec<EntryBrief>> {
         // $3 = fts_limit：内层子查询先限制候选集，防止高频词命中爆炸后排序代价过高
-        let fts_limit = (limit * 20).max(500).min(2000) as i64;
+        let fts_limit = super::checked_scaled_limit(limit, 20, 500, 2000)?;
+        let result_limit = super::checked_limit(limit)?;
         let mut p = 4usize;
         let mut sql = "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at::TEXT
                        FROM (
@@ -190,13 +216,16 @@ impl EntryOps for PgDb {
         if let Some(t) = filter.entry_type {
             q = q.bind(t);
         }
-        let rows = q.bind(limit as i64).fetch_all(&self.pool).await?;
+        let rows = q.bind(result_limit).fetch_all(&self.pool).await?;
 
         rows.iter().map(row_to_entry_brief).collect()
     }
 
     async fn update_entry(&self, id: &Uuid, input: UpdateEntry) -> Result<Entry> {
-        self.get_entry(id).await?;
+        let existing = self.get_entry(id).await?;
+        if let Some(Some(typ)) = input.r#type.as_ref() {
+            validate_entry_type(self, &existing.project_id, Some(typ)).await?;
+        }
 
         let tags_json = input.tags.map(|t| serde_json::to_string(&t)).transpose()?;
 
@@ -238,7 +267,8 @@ impl EntryOps for PgDb {
             .bind(new_cover_path.flatten())
             .bind(id)
             .fetch_one(&self.pool)
-            .await?;
+            .await
+            .map_err(|e| super::map_row_not_found(e, format!("entry {id}")))?;
 
         row_to_entry(&row)
     }
@@ -259,6 +289,8 @@ impl EntryOps for PgDb {
         let mut count = 0;
 
         for input in inputs {
+            validate_entry_type(self, &input.project_id, input.r#type.as_deref()).await?;
+
             let id = Uuid::now_v7();
             let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
             let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;

@@ -77,6 +77,7 @@ impl IdeaNoteOps for SqliteDb {
                 "only_global 与 project_id 不能同时使用".to_string(),
             ));
         }
+        let (limit, offset) = super::checked_pagination(limit, offset)?;
 
         let mut sql = "SELECT id, project_id, content, title, status, pinned, \
                     created_at, updated_at, last_reviewed_at, converted_entry_id \
@@ -107,8 +108,8 @@ impl IdeaNoteOps for SqliteDb {
             q = q.bind(if p { 1i64 } else { 0i64 });
         }
         let rows = q
-            .bind(limit as i64)
-            .bind(offset as i64)
+            .bind(limit)
+            .bind(offset)
             .fetch_all(&self.pool)
             .await?;
 
@@ -153,7 +154,8 @@ impl IdeaNoteOps for SqliteDb {
         .bind(input.converted_entry_id.flatten())
         .bind(id)
         .fetch_one(&self.pool)
-        .await?;
+        .await
+        .map_err(|e| super::map_row_not_found(e, format!("idea_note {id}")))?;
 
         let result = row_to_idea_note(&row)?;
         Ok(result)

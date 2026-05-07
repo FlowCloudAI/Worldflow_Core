@@ -163,7 +163,8 @@ impl EntryRelationOps for PgDb {
             .bind(input.content.as_deref())
             .bind(id)
             .fetch_one(&self.pool)
-            .await?;
+            .await
+            .map_err(|e| super::map_row_not_found(e, format!("entry_relation {id}")))?;
 
         row_to_relation(&row)
     }

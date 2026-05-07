@@ -231,6 +231,49 @@ async fn test_entry_with_tags() {
 }
 
 #[tokio::test]
+async fn test_search_entries_matches_summary_with_fts() {
+    let db = setup().await;
+
+    let project = db
+        .create_project(CreateProject {
+            cover_image: None,
+            name: "摘要搜索测试".to_string(),
+            description: None,
+        })
+        .await
+        .unwrap();
+
+    let entry = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: None,
+            title: "无关标题".to_string(),
+            summary: Some("星际航线枢纽".to_string()),
+            content: Some("正文不包含目标关键词".to_string()),
+            r#type: None,
+            tags: None,
+            images: None,
+        })
+        .await
+        .unwrap();
+
+    let results = db
+        .search_entries(&project.id, "航线枢纽", EntryFilter::default(), 20)
+        .await
+        .unwrap();
+
+    assert!(
+        results.iter().any(|item| item.id == entry.id),
+        "FTS 长查询应能命中 summary"
+    );
+
+    let overflow = db
+        .search_entries(&project.id, "航线枢纽", EntryFilter::default(), usize::MAX)
+        .await;
+    assert!(overflow.is_err(), "过大的 limit 应被提前拒绝");
+}
+
+#[tokio::test]
 async fn test_inspect_data() {
     let db = setup().await;
 
@@ -1014,6 +1057,82 @@ async fn test_filter_entries_by_custom_type_uuid() {
         filtered.iter().any(|e| e.id == entry.id),
         "Should find entry with custom type"
     );
+}
+
+#[tokio::test]
+async fn test_entry_type_validation_rejects_invalid_and_cross_project() {
+    let db = setup().await;
+
+    let project1 = db
+        .create_project(CreateProject {
+            cover_image: None,
+            name: "类型校验项目1".to_string(),
+            description: None,
+        })
+        .await
+        .unwrap();
+    let project2 = db
+        .create_project(CreateProject {
+            cover_image: None,
+            name: "类型校验项目2".to_string(),
+            description: None,
+        })
+        .await
+        .unwrap();
+
+    let invalid_builtin = db
+        .create_entry(CreateEntry {
+            project_id: project1.id,
+            category_id: None,
+            title: "非法类型词条".to_string(),
+            summary: None,
+            content: None,
+            r#type: Some("unknown_type".to_string()),
+            tags: None,
+            images: None,
+        })
+        .await;
+    assert!(invalid_builtin.is_err(), "未知内置类型 key 应被拒绝");
+
+    let custom_type = db
+        .create_entry_type(CreateCustomEntryType {
+            project_id: project1.id,
+            name: "项目1专属类型".to_string(),
+            description: None,
+            icon: None,
+            color: None,
+        })
+        .await
+        .unwrap();
+
+    let cross_project = db
+        .create_entry(CreateEntry {
+            project_id: project2.id,
+            category_id: None,
+            title: "跨项目类型词条".to_string(),
+            summary: None,
+            content: None,
+            r#type: Some(custom_type.id.to_string()),
+            tags: None,
+            images: None,
+        })
+        .await;
+    assert!(cross_project.is_err(), "跨项目自定义类型应被拒绝");
+
+    let valid = db
+        .create_entry(CreateEntry {
+            project_id: project1.id,
+            category_id: None,
+            title: "合法自定义类型词条".to_string(),
+            summary: None,
+            content: None,
+            r#type: Some(custom_type.id.to_string()),
+            tags: None,
+            images: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(valid.r#type, Some(custom_type.id.to_string()));
 }
 
 #[tokio::test]

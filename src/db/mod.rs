@@ -28,8 +28,10 @@ pub(crate) mod snapshot;
 #[cfg(feature = "sqlite")]
 mod tag_schema;
 
-use crate::error::Result;
+use crate::error::{Result, WorldflowError};
+#[cfg(feature = "sqlite")]
 use std::sync::OnceLock;
+#[cfg(feature = "sqlite")]
 use sysinfo::System;
 
 #[cfg(feature = "sqlite")]
@@ -43,7 +45,41 @@ use snapshot::{SnapshotConfig, SnapshotState};
 
 /// 进程启动时探测一次可用内存，后续所有连接复用同一档位。
 /// 避免测试或高负载场景下重复调用时因内存波动导致每次连接拿到不同的 cache 配置。
+#[cfg(feature = "sqlite")]
 static AVAILABLE_MEMORY_MB: OnceLock<u64> = OnceLock::new();
+
+pub(in crate::db) fn checked_limit(limit: usize) -> Result<i64> {
+    i64::try_from(limit).map_err(|_| WorldflowError::InvalidInput("limit 过大".to_owned()))
+}
+
+pub(in crate::db) fn checked_pagination(limit: usize, offset: usize) -> Result<(i64, i64)> {
+    let limit = checked_limit(limit)?;
+    let offset =
+        i64::try_from(offset).map_err(|_| WorldflowError::InvalidInput("offset 过大".to_owned()))?;
+    Ok((limit, offset))
+}
+
+pub(in crate::db) fn checked_scaled_limit(
+    limit: usize,
+    multiplier: usize,
+    min: i64,
+    max: i64,
+) -> Result<i64> {
+    let scaled = limit
+        .checked_mul(multiplier)
+        .ok_or_else(|| WorldflowError::InvalidInput("limit 过大".to_owned()))?;
+    Ok(checked_limit(scaled)?.max(min).min(max))
+}
+
+pub(in crate::db) fn map_row_not_found(
+    error: sqlx::Error,
+    resource: impl Into<String>,
+) -> WorldflowError {
+    match error {
+        sqlx::Error::RowNotFound => WorldflowError::NotFound(resource.into()),
+        other => WorldflowError::Database(other),
+    }
+}
 
 #[cfg(feature = "sqlite")]
 #[derive(Clone, Debug)]

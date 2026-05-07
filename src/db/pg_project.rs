@@ -74,7 +74,8 @@ impl ProjectOps for PgDb {
             .bind(input.cover_image.as_ref().and_then(|v| v.as_deref()))
             .bind(id)
             .fetch_one(&self.pool)
-            .await?;
+            .await
+            .map_err(|e| super::map_row_not_found(e, format!("project {id}")))?;
         row_to_project(&row)
     }
 

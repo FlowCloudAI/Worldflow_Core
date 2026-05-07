@@ -2,7 +2,7 @@ use super::traits::EntryOps;
 use crate::{
     db::SqliteDb,
     error::{Result, WorldflowError},
-    models::{CreateEntry, Entry, EntryBrief, EntryFilter, UpdateEntry},
+    models::{CreateEntry, Entry, EntryBrief, EntryFilter, UpdateEntry, validate_builtin_type_key},
 };
 use sqlx::Row;
 use std::path::PathBuf;
@@ -48,6 +48,28 @@ fn escape_like_pattern(input: &str) -> String {
         .replace('_', "\\_")
 }
 
+async fn validate_entry_type(db: &SqliteDb, project_id: &Uuid, typ: Option<&str>) -> Result<()> {
+    let Some(typ) = typ else {
+        return Ok(());
+    };
+    let Ok(type_id) = Uuid::parse_str(typ) else {
+        return validate_builtin_type_key(typ);
+    };
+    let row =
+        sqlx::query("SELECT COUNT(*) as cnt FROM entry_types WHERE id = ? AND project_id = ?")
+            .bind(type_id)
+            .bind(project_id)
+            .fetch_one(&db.pool)
+            .await?;
+    let cnt: i64 = row.try_get("cnt")?;
+    if cnt == 0 {
+        return Err(WorldflowError::InvalidInput(
+            "自定义词条类型不存在或不属于当前项目".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 impl EntryOps for SqliteDb {
     async fn count_entries(&self, project_id: &Uuid, filter: EntryFilter<'_>) -> Result<i64> {
         let mut sql = "SELECT COUNT(*) as cnt FROM entries WHERE project_id = ?".to_string();
@@ -71,6 +93,8 @@ impl EntryOps for SqliteDb {
     }
 
     async fn create_entry(&self, input: CreateEntry) -> Result<Entry> {
+        validate_entry_type(self, &input.project_id, input.r#type.as_deref()).await?;
+
         let id = Uuid::now_v7();
         let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
         let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;
@@ -122,6 +146,7 @@ impl EntryOps for SqliteDb {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<EntryBrief>> {
+        let (limit, offset) = super::checked_pagination(limit, offset)?;
         let mut sql =
             "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
                        FROM entries WHERE project_id = ?"
@@ -142,8 +167,8 @@ impl EntryOps for SqliteDb {
             q = q.bind(t);
         }
         let rows = q
-            .bind(limit as i64)
-            .bind(offset as i64)
+            .bind(limit)
+            .bind(offset)
             .fetch_all(&self.pool)
             .await?;
 
@@ -159,6 +184,7 @@ impl EntryOps for SqliteDb {
     ) -> Result<Vec<EntryBrief>> {
         let query = query.trim();
         let query_char_len = query.chars().count();
+        let result_limit = super::checked_limit(limit)?;
 
         if query_char_len < 3 {
             let like_query = format!("%{}%", escape_like_pattern(query));
@@ -191,7 +217,7 @@ impl EntryOps for SqliteDb {
             if let Some(t) = filter.entry_type {
                 q = q.bind(t);
             }
-            let rows = q.bind(limit as i64).fetch_all(&self.pool).await?;
+            let rows = q.bind(result_limit).fetch_all(&self.pool).await?;
 
             return rows.iter().map(row_to_entry_brief).collect();
         }
@@ -199,7 +225,7 @@ impl EntryOps for SqliteDb {
         // FTS 子查询只做 MATCH + LIMIT，LIMIT 才能真正在扫描阶段提前截断候选集。
         // project_id 过滤留在外层 WHERE，走主表 B-tree 索引。
         // 4 倍于最终结果数，上限 500，兼顾 sparse（不过度扫描）和 dense（不爆炸）。
-        let fts_limit = ((limit as i64) * 4).min(500);
+        let fts_limit = super::checked_scaled_limit(limit, 4, 0, 500)?;
         let mut sql = "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
                        FROM entries
                        WHERE project_id = ?
@@ -222,13 +248,16 @@ impl EntryOps for SqliteDb {
         if let Some(t) = filter.entry_type {
             q = q.bind(t);
         }
-        let rows = q.bind(limit as i64).fetch_all(&self.pool).await?;
+        let rows = q.bind(result_limit).fetch_all(&self.pool).await?;
 
         rows.iter().map(row_to_entry_brief).collect()
     }
 
     async fn update_entry(&self, id: &Uuid, input: UpdateEntry) -> Result<Entry> {
-        self.get_entry(id).await?;
+        let existing = self.get_entry(id).await?;
+        if let Some(Some(typ)) = input.r#type.as_ref() {
+            validate_entry_type(self, &existing.project_id, Some(typ)).await?;
+        }
 
         let tags_json = input.tags.map(|t| serde_json::to_string(&t)).transpose()?;
 
@@ -270,7 +299,8 @@ impl EntryOps for SqliteDb {
             .bind(new_cover_path.flatten())
             .bind(id)
             .fetch_one(&self.pool)
-            .await?;
+            .await
+            .map_err(|e| super::map_row_not_found(e, format!("entry {id}")))?;
 
         let result = row_to_entry(&row)?;
         Ok(result)
@@ -293,6 +323,8 @@ impl EntryOps for SqliteDb {
         let mut count = 0;
 
         for input in inputs {
+            validate_entry_type(self, &input.project_id, input.r#type.as_deref()).await?;
+
             let id = Uuid::now_v7();
             let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
             let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;

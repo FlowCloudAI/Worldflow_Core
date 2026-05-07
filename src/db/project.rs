@@ -75,7 +75,8 @@ impl ProjectOps for SqliteDb {
         .bind(input.cover_image.as_ref().and_then(|v| v.as_deref()))
         .bind(id)
         .fetch_one(&self.pool)
-        .await?;
+        .await
+        .map_err(|e| super::map_row_not_found(e, format!("project {id}")))?;
         let result = row_to_project(&row)?;
         Ok(result)
     }

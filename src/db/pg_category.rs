@@ -128,7 +128,8 @@ impl CategoryOps for PgDb {
                 .bind(input.sort_order)
                 .bind(id)
                 .fetch_one(&self.pool)
-                .await?,
+                .await
+                .map_err(|e| super::map_row_not_found(e, format!("category {id}")))?,
             Some(new_parent) => sqlx::query(
                 "UPDATE categories
                  SET parent_id  = $1,
@@ -142,7 +143,8 @@ impl CategoryOps for PgDb {
                 .bind(input.sort_order)
                 .bind(id)
                 .fetch_one(&self.pool)
-                .await?,
+                .await
+                .map_err(|e| super::map_row_not_found(e, format!("category {id}")))?,
         };
         row_to_category(&row)
     }

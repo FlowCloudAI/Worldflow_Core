@@ -168,7 +168,8 @@ impl EntryTypeOps for PgDb {
         .bind(input.color.flatten())
         .bind(id)
         .fetch_one(&self.pool)
-        .await?;
+        .await
+        .map_err(|e| super::map_row_not_found(e, format!("entry_type {id}")))?;
 
         row_to_custom_entry_type(&row)
     }

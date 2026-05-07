@@ -131,7 +131,8 @@ impl CategoryOps for SqliteDb {
                 .bind(input.sort_order)
                 .bind(id)
                 .fetch_one(&self.pool)
-                .await?
+                .await
+                .map_err(|e| super::map_row_not_found(e, format!("category {id}")))?
             }
 
             Some(new_parent) => {
@@ -148,7 +149,8 @@ impl CategoryOps for SqliteDb {
                 .bind(input.sort_order)
                 .bind(id)
                 .fetch_one(&self.pool)
-                .await?
+                .await
+                .map_err(|e| super::map_row_not_found(e, format!("category {id}")))?
             }
         };
         let result = row_to_category(&row)?;
