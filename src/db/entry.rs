@@ -2,7 +2,9 @@ use super::traits::EntryOps;
 use crate::{
     db::SqliteDb,
     error::{Result, WorldflowError},
-    models::{CreateEntry, Entry, EntryBrief, EntryFilter, UpdateEntry, validate_builtin_type_key},
+    models::{
+        CreateEntry, Entry, EntryBrief, EntryFilter, FCImage, UpdateEntry, validate_builtin_type_key,
+    },
 };
 use sqlx::Row;
 use std::path::PathBuf;
@@ -39,6 +41,13 @@ fn row_to_entry_brief(row: &sqlx::sqlite::SqliteRow) -> Result<EntryBrief> {
         cover: cover_str.map(PathBuf::from),
         updated_at: row.try_get("updated_at")?,
     })
+}
+
+fn cover_path_from_images(images: &[FCImage]) -> Option<String> {
+    images
+        .iter()
+        .find(|i| i.is_cover)
+        .map(|i| i.path.to_string_lossy().to_string())
 }
 
 fn escape_like_pattern(input: &str) -> String {
@@ -99,10 +108,9 @@ impl EntryOps for SqliteDb {
         let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
         let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;
         let cover_path = input
-            .images
-            .as_ref()
-            .and_then(|imgs| imgs.iter().find(|i| i.is_cover))
-            .map(|i| i.path.to_string_lossy().to_string());
+            .cover_path
+            .clone()
+            .or_else(|| input.images.as_deref().and_then(cover_path_from_images));
 
         let row = sqlx::query(
             "INSERT INTO entries (id, project_id, category_id, title, summary, content, type, tags, images, cover_path)
@@ -261,12 +269,11 @@ impl EntryOps for SqliteDb {
 
         let tags_json = input.tags.map(|t| serde_json::to_string(&t)).transpose()?;
 
-        let new_cover_path = input.images.as_ref().map(|imgs| {
-            imgs.iter()
-                .find(|i| i.is_cover)
-                .map(|i| i.path.to_string_lossy().to_string())
-        });
-        let images_is_some = input.images.is_some();
+        let new_cover_path = input
+            .cover_path
+            .clone()
+            .or_else(|| input.images.as_deref().map(cover_path_from_images));
+        let cover_path_is_some = new_cover_path.is_some();
         let images_json = input
             .images
             .map(|i| serde_json::to_string(&i))
@@ -295,7 +302,7 @@ impl EntryOps for SqliteDb {
             .bind(input.r#type.flatten())
             .bind(tags_json)
             .bind(images_json)
-            .bind(images_is_some)
+            .bind(cover_path_is_some)
             .bind(new_cover_path.flatten())
             .bind(id)
             .fetch_one(&self.pool)
@@ -329,10 +336,9 @@ impl EntryOps for SqliteDb {
             let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
             let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;
             let cover_path = input
-                .images
-                .as_ref()
-                .and_then(|imgs| imgs.iter().find(|i| i.is_cover))
-                .map(|i| i.path.to_string_lossy().to_string());
+                .cover_path
+                .clone()
+                .or_else(|| input.images.as_deref().and_then(cover_path_from_images));
 
             sqlx::query(
                 "INSERT INTO entries (id, project_id, category_id, title, summary, content, type, tags, images, cover_path)

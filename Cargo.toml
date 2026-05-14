@@ -24,6 +24,10 @@ tempfile = "3"
 name = "average_stress_test"
 harness = false
 
+[[test]]
+name = "stress_test_pg"
+required-features = ["postgres"]
+
 [features]
 default = ["sqlite", "snapshot"]
 sqlite = ["sqlx/sqlite"]

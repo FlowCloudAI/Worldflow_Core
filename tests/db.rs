@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, path::PathBuf};
 use uuid::Uuid;
 use worldflow_core::models::EntryFilter;
 use worldflow_core::{
@@ -163,6 +163,7 @@ async fn test_entry_with_tags() {
                 value: serde_json::json!(85),
             }]),
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();
@@ -203,6 +204,7 @@ async fn test_entry_with_tags() {
                     value: serde_json::json!(99),
                 }]),
                 images: None,
+                cover_path: None,
             },
         )
         .await
@@ -221,6 +223,7 @@ async fn test_entry_with_tags() {
                 r#type: None,
                 tags: None,
                 images: None,
+                cover_path: None,
             },
         )
         .await
@@ -228,6 +231,107 @@ async fn test_entry_with_tags() {
     assert_eq!(cleared.summary, None);
 
     db.delete_project(&project.id).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_entry_cover_path_explicit_and_fallback() {
+    let db = setup().await;
+
+    let project = db
+        .create_project(CreateProject {
+            cover_image: None,
+            name: "封面路径测试".to_string(),
+            description: None,
+        })
+        .await
+        .unwrap();
+
+    let original_cover = PathBuf::from("images/project/original.jpg");
+    let thumb_cover = "images/project/thumbs/original_cover.jpg".to_string();
+    let entry = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: None,
+            title: "显式封面词条".to_string(),
+            summary: None,
+            content: None,
+            r#type: None,
+            tags: None,
+            images: Some(vec![FCImage {
+                path: original_cover.clone(),
+                is_cover: true,
+                caption: None,
+            }]),
+            cover_path: Some(thumb_cover.clone()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(entry.cover_path, Some(thumb_cover.clone()));
+    let listed = db
+        .list_entries(&project.id, EntryFilter::default(), 10, 0)
+        .await
+        .unwrap();
+    assert_eq!(listed[0].cover, Some(PathBuf::from(&thumb_cover)));
+
+    let fallback = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: None,
+            title: "兼容封面词条".to_string(),
+            summary: None,
+            content: None,
+            r#type: None,
+            tags: None,
+            images: Some(vec![FCImage {
+                path: original_cover.clone(),
+                is_cover: true,
+                caption: None,
+            }]),
+            cover_path: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        fallback.cover_path,
+        Some(original_cover.to_string_lossy().to_string())
+    );
+
+    let updated_thumb = "images/project/thumbs/updated_cover.jpg".to_string();
+    let updated = db
+        .update_entry(
+            &entry.id,
+            UpdateEntry {
+                title: None,
+                summary: None,
+                content: None,
+                category_id: None,
+                r#type: None,
+                tags: None,
+                images: None,
+                cover_path: Some(Some(updated_thumb.clone())),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.cover_path, Some(updated_thumb));
+
+    let cleared = db
+        .update_entry(
+            &entry.id,
+            UpdateEntry {
+                title: None,
+                summary: None,
+                content: None,
+                category_id: None,
+                r#type: None,
+                tags: None,
+                images: None,
+                cover_path: Some(None),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(cleared.cover_path, None);
 }
 
 #[tokio::test]
@@ -253,6 +357,7 @@ async fn test_search_entries_matches_summary_with_fts() {
             r#type: None,
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();
@@ -334,6 +439,7 @@ async fn test_inspect_data() {
                 value: serde_json::json!(10),
             }]),
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();
@@ -377,6 +483,7 @@ async fn test_entry_links_replace_and_query_by_id() {
             r#type: None,
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();
@@ -391,6 +498,7 @@ async fn test_entry_links_replace_and_query_by_id() {
             r#type: None,
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();
@@ -405,6 +513,7 @@ async fn test_entry_links_replace_and_query_by_id() {
             r#type: None,
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();
@@ -439,6 +548,7 @@ async fn test_entry_links_replace_and_query_by_id() {
                 r#type: None,
                 tags: None,
                 images: None,
+                cover_path: None,
             },
         )
         .await
@@ -495,6 +605,7 @@ async fn test_entry_links_foreign_key_rejects_missing_target() {
             r#type: None,
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();
@@ -794,6 +905,7 @@ async fn test_delete_custom_entry_type_in_use() {
             r#type: Some(custom_type.id.to_string()),
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();
@@ -929,6 +1041,7 @@ async fn test_filter_entries_by_builtin_type() {
             r#type: Some("character".to_string()),
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();
@@ -943,6 +1056,7 @@ async fn test_filter_entries_by_builtin_type() {
             r#type: Some("location".to_string()),
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();
@@ -957,6 +1071,7 @@ async fn test_filter_entries_by_builtin_type() {
             r#type: Some("item".to_string()),
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();
@@ -1034,6 +1149,7 @@ async fn test_filter_entries_by_custom_type_uuid() {
             r#type: Some(custom_type.id.to_string()),
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();
@@ -1090,6 +1206,7 @@ async fn test_entry_type_validation_rejects_invalid_and_cross_project() {
             r#type: Some("unknown_type".to_string()),
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await;
     assert!(invalid_builtin.is_err(), "未知内置类型 key 应被拒绝");
@@ -1115,6 +1232,7 @@ async fn test_entry_type_validation_rejects_invalid_and_cross_project() {
             r#type: Some(custom_type.id.to_string()),
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await;
     assert!(cross_project.is_err(), "跨项目自定义类型应被拒绝");
@@ -1129,6 +1247,7 @@ async fn test_entry_type_validation_rejects_invalid_and_cross_project() {
             r#type: Some(custom_type.id.to_string()),
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();

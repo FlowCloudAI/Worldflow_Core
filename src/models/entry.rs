@@ -54,6 +54,8 @@ pub struct CreateEntry {
     pub r#type: Option<String>,
     pub tags: Option<Vec<EntryTag>>,
     pub images: Option<Vec<FCImage>>,
+    /// 词条封面展示图路径。None 时兼容旧逻辑，从 images 中的 is_cover 图片推导。
+    pub cover_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -72,4 +74,7 @@ pub struct UpdateEntry {
     pub r#type: Option<Option<String>>,
     pub tags: Option<Vec<EntryTag>>,
     pub images: Option<Vec<FCImage>>,
+    /// None = 不主动设置；Some(None) = 清空；Some(Some(s)) = 更新为指定展示图路径。
+    /// 当该字段为 None 且 images 为 Some 时，兼容旧逻辑，从 images 中的 is_cover 图片推导。
+    pub cover_path: Option<Option<String>>,
 }

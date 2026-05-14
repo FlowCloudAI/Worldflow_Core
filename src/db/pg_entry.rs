@@ -2,7 +2,9 @@ use super::traits::EntryOps;
 use crate::{
     db::PgDb,
     error::{Result, WorldflowError},
-    models::{CreateEntry, Entry, EntryBrief, EntryFilter, UpdateEntry, validate_builtin_type_key},
+    models::{
+        CreateEntry, Entry, EntryBrief, EntryFilter, FCImage, UpdateEntry, validate_builtin_type_key,
+    },
 };
 use sqlx::Row;
 use std::path::PathBuf;
@@ -63,6 +65,13 @@ fn row_to_entry_brief(row: &sqlx::postgres::PgRow) -> Result<EntryBrief> {
     })
 }
 
+fn cover_path_from_images(images: &[FCImage]) -> Option<String> {
+    images
+        .iter()
+        .find(|i| i.is_cover)
+        .map(|i| i.path.to_string_lossy().to_string())
+}
+
 impl EntryOps for PgDb {
     async fn count_entries(&self, project_id: &Uuid, filter: EntryFilter<'_>) -> Result<i64> {
         let mut p = 2usize;
@@ -94,10 +103,9 @@ impl EntryOps for PgDb {
         let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
         let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;
         let cover_path = input
-            .images
-            .as_ref()
-            .and_then(|imgs| imgs.iter().find(|i| i.is_cover))
-            .map(|i| i.path.to_string_lossy().to_string());
+            .cover_path
+            .clone()
+            .or_else(|| input.images.as_deref().and_then(cover_path_from_images));
 
         let row = sqlx::query(
             "INSERT INTO entries (id, project_id, category_id, title, summary, content, type, tags, images, cover_path)
@@ -229,12 +237,11 @@ impl EntryOps for PgDb {
 
         let tags_json = input.tags.map(|t| serde_json::to_string(&t)).transpose()?;
 
-        let new_cover_path = input.images.as_ref().map(|imgs| {
-            imgs.iter()
-                .find(|i| i.is_cover)
-                .map(|i| i.path.to_string_lossy().to_string())
-        });
-        let images_is_some = input.images.is_some();
+        let new_cover_path = input
+            .cover_path
+            .clone()
+            .or_else(|| input.images.as_deref().map(cover_path_from_images));
+        let cover_path_is_some = new_cover_path.is_some();
         let images_json = input
             .images
             .map(|i| serde_json::to_string(&i))
@@ -263,7 +270,7 @@ impl EntryOps for PgDb {
             .bind(input.r#type.flatten())
             .bind(tags_json)
             .bind(images_json)
-            .bind(images_is_some)
+            .bind(cover_path_is_some)
             .bind(new_cover_path.flatten())
             .bind(id)
             .fetch_one(&self.pool)
@@ -295,10 +302,9 @@ impl EntryOps for PgDb {
             let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
             let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;
             let cover_path = input
-                .images
-                .as_ref()
-                .and_then(|imgs| imgs.iter().find(|i| i.is_cover))
-                .map(|i| i.path.to_string_lossy().to_string());
+                .cover_path
+                .clone()
+                .or_else(|| input.images.as_deref().and_then(cover_path_from_images));
 
             sqlx::query(
                 "INSERT INTO entries (id, project_id, category_id, title, summary, content, type, tags, images, cover_path)

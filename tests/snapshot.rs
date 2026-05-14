@@ -56,6 +56,7 @@ async fn seed_entry(db: &SqliteDb, project_id: Uuid, title: &str) -> worldflow_c
         r#type: None,
         tags: None,
         images: None,
+        cover_path: None,
     })
     .await
     .unwrap()
@@ -123,6 +124,7 @@ async fn test_snapshot_preserves_empty_optional_strings() {
             r#type: None,
             tags: None,
             images: None,
+            cover_path: None,
         })
         .await
         .unwrap();

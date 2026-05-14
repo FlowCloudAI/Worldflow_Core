@@ -159,6 +159,7 @@ async fn seed_base_data(db: &SqliteDb) -> SeedData {
                     r#type: Some(entry_types[ei % entry_types.len()].to_string()),
                     tags: Some(tags),
                     images: Some(fake_images),
+                    cover_path: None,
                 }
             })
             .collect();
@@ -668,6 +669,7 @@ async fn bench_sqlite_custom_entry_types() {
                     r#type: Some(type_id.clone()),
                     tags: None,
                     images: None,
+                    cover_path: None,
                 });
                 entry_count += 1;
             }

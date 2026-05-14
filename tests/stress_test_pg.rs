@@ -137,6 +137,7 @@ async fn stress_write_and_query_pg() {
                     r#type: Some(entry_types[ei % entry_types.len()].to_string()),
                     tags: Some(tags),
                     images: Some(fake_images),
+                    cover_path: None,
                 }
             })
             .collect();
@@ -454,6 +455,7 @@ async fn stress_custom_entry_types_pg() {
                     r#type: Some(type_id.clone()),
                     tags: None,
                     images: None,
+                    cover_path: None,
                 });
                 entry_count += 1;
             }
