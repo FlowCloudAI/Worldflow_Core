@@ -12,6 +12,8 @@ pub mod postgres;
 #[cfg(feature = "sqlite")]
 mod category;
 #[cfg(feature = "sqlite")]
+pub mod csv_bundle;
+#[cfg(feature = "sqlite")]
 mod entry;
 #[cfg(feature = "sqlite")]
 mod entry_link;
