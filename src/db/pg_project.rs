@@ -26,12 +26,12 @@ impl ProjectOps for PgDb {
              VALUES ($1, $2, $3, $4)
              RETURNING id, name, description, cover_image, created_at::TEXT, updated_at::TEXT",
         )
-            .bind(&id)
-            .bind(&input.name)
-            .bind(&input.description)
-            .bind(&input.cover_image)
-            .fetch_one(&self.pool)
-            .await?;
+        .bind(&id)
+        .bind(&input.name)
+        .bind(&input.description)
+        .bind(&input.cover_image)
+        .fetch_one(&self.pool)
+        .await?;
         row_to_project(&row)
     }
 
@@ -40,10 +40,10 @@ impl ProjectOps for PgDb {
             "SELECT id, name, description, cover_image, created_at::TEXT, updated_at::TEXT
              FROM projects WHERE id = $1",
         )
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| WorldflowError::NotFound(format!("project {id}")))?;
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| WorldflowError::NotFound(format!("project {id}")))?;
         row_to_project(&row)
     }
 
@@ -52,8 +52,8 @@ impl ProjectOps for PgDb {
             "SELECT id, name, description, cover_image, created_at::TEXT, updated_at::TEXT
              FROM projects ORDER BY created_at DESC",
         )
-            .fetch_all(&self.pool)
-            .await?;
+        .fetch_all(&self.pool)
+        .await?;
         rows.iter().map(row_to_project).collect()
     }
 
@@ -67,15 +67,15 @@ impl ProjectOps for PgDb {
               WHERE id = $6
               RETURNING id, name, description, cover_image, created_at::TEXT, updated_at::TEXT",
         )
-            .bind(&input.name)
-            .bind(input.description.is_some())
-            .bind(input.description.as_ref().and_then(|v| v.as_deref()))
-            .bind(input.cover_image.is_some())
-            .bind(input.cover_image.as_ref().and_then(|v| v.as_deref()))
-            .bind(id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| super::map_row_not_found(e, format!("project {id}")))?;
+        .bind(&input.name)
+        .bind(input.description.is_some())
+        .bind(input.description.as_ref().and_then(|v| v.as_deref()))
+        .bind(input.cover_image.is_some())
+        .bind(input.cover_image.as_ref().and_then(|v| v.as_deref()))
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| super::map_row_not_found(e, format!("project {id}")))?;
         row_to_project(&row)
     }
 

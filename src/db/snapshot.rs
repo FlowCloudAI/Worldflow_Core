@@ -560,7 +560,9 @@ async fn export_idea_notes(pool: &SqlitePool, dir: &Path) -> Result<()> {
             pinned: row.try_get::<i64, _>("pinned")?.to_string(),
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
-            last_reviewed_at: encode_opt_str(row.try_get::<Option<String>, _>("last_reviewed_at")?)?,
+            last_reviewed_at: encode_opt_str(
+                row.try_get::<Option<String>, _>("last_reviewed_at")?,
+            )?,
             converted_entry_id: row
                 .try_get::<Option<Uuid>, _>("converted_entry_id")?
                 .map(|u| u.to_string())

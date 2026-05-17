@@ -107,11 +107,7 @@ impl IdeaNoteOps for SqliteDb {
         if let Some(p) = filter.pinned {
             q = q.bind(if p { 1i64 } else { 0i64 });
         }
-        let rows = q
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = q.bind(limit).bind(offset).fetch_all(&self.pool).await?;
 
         rows.iter().map(row_to_idea_note).collect()
     }

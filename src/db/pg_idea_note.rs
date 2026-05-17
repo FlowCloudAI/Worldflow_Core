@@ -117,11 +117,7 @@ impl IdeaNoteOps for PgDb {
         if let Some(pv) = filter.pinned {
             q = q.bind(pv);
         }
-        let rows = q
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = q.bind(limit).bind(offset).fetch_all(&self.pool).await?;
 
         rows.iter().map(row_to_idea_note).collect()
     }

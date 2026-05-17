@@ -30,10 +30,10 @@ impl CategoryOps for PgDb {
          )
          SELECT COUNT(*) as cnt FROM descendants WHERE id = $2",
         )
-            .bind(id)
-            .bind(new_parent_id)
-            .fetch_one(&self.pool)
-            .await?;
+        .bind(id)
+        .bind(new_parent_id)
+        .fetch_one(&self.pool)
+        .await?;
         let cnt: i64 = row.try_get("cnt")?;
         Ok(cnt > 0)
     }
@@ -87,10 +87,10 @@ impl CategoryOps for PgDb {
             "SELECT id, project_id, parent_id, name, sort_order, created_at::TEXT, updated_at::TEXT
              FROM categories WHERE id = $1",
         )
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| WorldflowError::NotFound(format!("category {id}")))?;
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| WorldflowError::NotFound(format!("category {id}")))?;
         row_to_category(&row)
     }
 
@@ -101,9 +101,9 @@ impl CategoryOps for PgDb {
              WHERE project_id = $1
              ORDER BY parent_id NULLS FIRST, sort_order, name",
         )
-            .bind(project_id)
-            .fetch_all(&self.pool)
-            .await?;
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await?;
         rows.iter().map(row_to_category).collect()
     }
 

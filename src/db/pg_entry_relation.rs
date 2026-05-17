@@ -186,10 +186,10 @@ impl EntryRelationOps for PgDb {
              WHERE (a_id = $1 AND b_id = $2)
                 OR (a_id = $2 AND b_id = $1)",
         )
-            .bind(entry_a)
-            .bind(entry_b)
-            .execute(&self.pool)
-            .await?;
+        .bind(entry_a)
+        .bind(entry_b)
+        .execute(&self.pool)
+        .await?;
 
         Ok(result.rows_affected())
     }

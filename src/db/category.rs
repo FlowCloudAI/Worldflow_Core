@@ -119,39 +119,35 @@ impl CategoryOps for SqliteDb {
         }
         self.get_category(id).await?;
         let row = match input.parent_id {
-            None => {
-                sqlx::query(
-                    "UPDATE categories
+            None => sqlx::query(
+                "UPDATE categories
                  SET name       = COALESCE(?, name),
                      sort_order = COALESCE(?, sort_order)
                  WHERE id = ?
                  RETURNING id, project_id, parent_id, name, sort_order, created_at, updated_at",
-                )
-                .bind(&input.name)
-                .bind(input.sort_order)
-                .bind(id)
-                .fetch_one(&self.pool)
-                .await
-                .map_err(|e| super::map_row_not_found(e, format!("category {id}")))?
-            }
+            )
+            .bind(&input.name)
+            .bind(input.sort_order)
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| super::map_row_not_found(e, format!("category {id}")))?,
 
-            Some(new_parent) => {
-                sqlx::query(
-                    "UPDATE categories
+            Some(new_parent) => sqlx::query(
+                "UPDATE categories
                  SET parent_id  = ?,
                      name       = COALESCE(?, name),
                      sort_order = COALESCE(?, sort_order)
                  WHERE id = ?
                  RETURNING id, project_id, parent_id, name, sort_order, created_at, updated_at",
-                )
-                .bind(new_parent)
-                .bind(&input.name)
-                .bind(input.sort_order)
-                .bind(id)
-                .fetch_one(&self.pool)
-                .await
-                .map_err(|e| super::map_row_not_found(e, format!("category {id}")))?
-            }
+            )
+            .bind(new_parent)
+            .bind(&input.name)
+            .bind(input.sort_order)
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| super::map_row_not_found(e, format!("category {id}")))?,
         };
         let result = row_to_category(&row)?;
         Ok(result)

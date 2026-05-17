@@ -3,7 +3,8 @@ use crate::{
     db::PgDb,
     error::{Result, WorldflowError},
     models::{
-        CreateEntry, Entry, EntryBrief, EntryFilter, FCImage, UpdateEntry, validate_builtin_type_key,
+        CreateEntry, Entry, EntryBrief, EntryFilter, FCImage, UpdateEntry,
+        validate_builtin_type_key,
     },
 };
 use sqlx::Row;
@@ -174,11 +175,7 @@ impl EntryOps for PgDb {
         if let Some(t) = filter.entry_type {
             q = q.bind(t);
         }
-        let rows = q
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = q.bind(limit).bind(offset).fetch_all(&self.pool).await?;
 
         rows.iter().map(row_to_entry_brief).collect()
     }

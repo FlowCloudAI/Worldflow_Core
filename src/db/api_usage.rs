@@ -54,14 +54,16 @@ pub async fn query_usage_by_model(pool: &SqlitePool) -> Result<Vec<ApiUsageByMod
 
     Ok(rows
         .into_iter()
-        .map(|(model, provider, modality, pt, ct, tt, cc)| ApiUsageByModel {
-            model,
-            provider,
-            modality,
-            prompt_tokens: pt,
-            completion_tokens: ct,
-            total_tokens: tt,
-            call_count: cc,
-        })
+        .map(
+            |(model, provider, modality, pt, ct, tt, cc)| ApiUsageByModel {
+                model,
+                provider,
+                modality,
+                prompt_tokens: pt,
+                completion_tokens: ct,
+                total_tokens: tt,
+                call_count: cc,
+            },
+        )
         .collect())
 }

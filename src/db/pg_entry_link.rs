@@ -37,12 +37,12 @@ impl EntryLinkOps for PgDb {
              VALUES ($1, $2, $3, $4)
              RETURNING id, project_id, a_id, b_id",
         )
-            .bind(id)
-            .bind(input.project_id)
-            .bind(input.a_id)
-            .bind(input.b_id)
-            .fetch_one(&self.pool)
-            .await?;
+        .bind(id)
+        .bind(input.project_id)
+        .bind(input.a_id)
+        .bind(input.b_id)
+        .fetch_one(&self.pool)
+        .await?;
 
         row_to_link(&row)
     }
@@ -54,9 +54,9 @@ impl EntryLinkOps for PgDb {
              WHERE a_id = $1
              ORDER BY created_at, id",
         )
-            .bind(entry_id)
-            .fetch_all(&self.pool)
-            .await?;
+        .bind(entry_id)
+        .fetch_all(&self.pool)
+        .await?;
 
         rows.iter().map(row_to_link).collect()
     }
@@ -68,9 +68,9 @@ impl EntryLinkOps for PgDb {
              WHERE b_id = $1
              ORDER BY created_at, id",
         )
-            .bind(entry_id)
-            .fetch_all(&self.pool)
-            .await?;
+        .bind(entry_id)
+        .fetch_all(&self.pool)
+        .await?;
 
         rows.iter().map(row_to_link).collect()
     }
@@ -105,12 +105,12 @@ impl EntryLinkOps for PgDb {
                  VALUES ($1, $2, $3, $4)
                  RETURNING id, project_id, a_id, b_id",
             )
-                .bind(Uuid::now_v7())
-                .bind(project_id)
-                .bind(entry_id)
-                .bind(linked_id)
-                .fetch_one(&mut *tx)
-                .await?;
+            .bind(Uuid::now_v7())
+            .bind(project_id)
+            .bind(entry_id)
+            .bind(linked_id)
+            .fetch_one(&mut *tx)
+            .await?;
             links.push(row_to_link(&row)?);
         }
 
