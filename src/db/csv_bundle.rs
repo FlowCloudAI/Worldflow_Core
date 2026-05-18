@@ -132,6 +132,23 @@ pub struct CsvImportResult {
     pub idea_notes: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CsvImportProgressPhase {
+    TableStarted,
+    RowProcessed,
+    TableFinished,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CsvImportProgress {
+    pub table: WorldflowCsvTable,
+    pub phase: CsvImportProgressPhase,
+    pub current: usize,
+    pub total: usize,
+    pub inserted: usize,
+}
+
 // ═══════════════════════════════════════ CSV 行结构 ══════════════════════════════════════════════
 // 所有字段均为 String。"" ↔ None 的转换在导入/导出中显式处理。
 
@@ -865,6 +882,18 @@ pub(in crate::db) async fn import_all_bytes(
     bytes: AllCsvBytes,
     mode: CsvImportMode,
 ) -> Result<CsvImportResult> {
+    import_all_bytes_with_progress(pool, bytes, mode, |_| {}).await
+}
+
+pub(in crate::db) async fn import_all_bytes_with_progress<F>(
+    pool: &SqlitePool,
+    bytes: AllCsvBytes,
+    mode: CsvImportMode,
+    mut progress: F,
+) -> Result<CsvImportResult>
+where
+    F: FnMut(CsvImportProgress),
+{
     let parsed = parse_all_csv(&bytes)?;
 
     let mut conn = pool.acquire().await?;
@@ -874,7 +903,7 @@ pub(in crate::db) async fn import_all_bytes(
         .await?;
     sqlx::query("BEGIN").execute(&mut *conn).await?;
 
-    let result = do_apply(&mut conn, parsed, mode).await;
+    let result = do_apply(&mut conn, parsed, mode, &mut progress).await;
 
     match result {
         Ok(r) => {
@@ -898,6 +927,7 @@ async fn do_apply(
     conn: &mut SqliteConnection,
     mut parsed: ParsedCsvData,
     mode: CsvImportMode,
+    progress: &mut impl FnMut(CsvImportProgress),
 ) -> Result<CsvImportResult> {
     if matches!(mode, CsvImportMode::Replace) {
         for table in &[
@@ -919,20 +949,50 @@ async fn do_apply(
     parsed.categories = sort_categories_topological(parsed.categories);
 
     let mut r = CsvImportResult::default();
-    r.projects = insert_projects(conn, &parsed.projects).await?;
-    r.categories = insert_categories(conn, &parsed.categories).await?;
-    r.tag_schemas = insert_tag_schemas(conn, &parsed.tag_schemas).await?;
-    r.entry_types = insert_entry_types(conn, &parsed.entry_types).await?;
-    r.entries = insert_entries(conn, &parsed.entries).await?;
-    r.relations = insert_entry_relations(conn, &parsed.entry_relations).await?;
-    r.links = insert_entry_links(conn, &parsed.entry_links).await?;
-    r.idea_notes = insert_idea_notes(conn, &parsed.idea_notes).await?;
+    r.projects = insert_projects(conn, &parsed.projects, progress).await?;
+    r.categories = insert_categories(conn, &parsed.categories, progress).await?;
+    r.tag_schemas = insert_tag_schemas(conn, &parsed.tag_schemas, progress).await?;
+    r.entry_types = insert_entry_types(conn, &parsed.entry_types, progress).await?;
+    r.entries = insert_entries(conn, &parsed.entries, progress).await?;
+    r.relations = insert_entry_relations(conn, &parsed.entry_relations, progress).await?;
+    r.links = insert_entry_links(conn, &parsed.entry_links, progress).await?;
+    r.idea_notes = insert_idea_notes(conn, &parsed.idea_notes, progress).await?;
     Ok(r)
 }
 
-async fn insert_projects(conn: &mut SqliteConnection, rows: &[ProjectRow]) -> Result<usize> {
+fn emit_import_progress(
+    progress: &mut impl FnMut(CsvImportProgress),
+    table: WorldflowCsvTable,
+    phase: CsvImportProgressPhase,
+    current: usize,
+    total: usize,
+    inserted: usize,
+) {
+    progress(CsvImportProgress {
+        table,
+        phase,
+        current,
+        total,
+        inserted,
+    });
+}
+
+async fn insert_projects(
+    conn: &mut SqliteConnection,
+    rows: &[ProjectRow],
+    progress: &mut impl FnMut(CsvImportProgress),
+) -> Result<usize> {
+    let table = WorldflowCsvTable::Projects;
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableStarted,
+        0,
+        rows.len(),
+        0,
+    );
     let mut count = 0usize;
-    for row in rows {
+    for (index, row) in rows.iter().enumerate() {
         let id = parse_uuid(&row.id)?;
         let n = sqlx::query(
             "INSERT OR IGNORE INTO projects
@@ -949,13 +1009,42 @@ async fn insert_projects(conn: &mut SqliteConnection, rows: &[ProjectRow]) -> Re
         .await?
         .rows_affected();
         count += n as usize;
+        emit_import_progress(
+            progress,
+            table,
+            CsvImportProgressPhase::RowProcessed,
+            index + 1,
+            rows.len(),
+            count,
+        );
     }
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableFinished,
+        rows.len(),
+        rows.len(),
+        count,
+    );
     Ok(count)
 }
 
-async fn insert_categories(conn: &mut SqliteConnection, rows: &[CategoryRow]) -> Result<usize> {
+async fn insert_categories(
+    conn: &mut SqliteConnection,
+    rows: &[CategoryRow],
+    progress: &mut impl FnMut(CsvImportProgress),
+) -> Result<usize> {
+    let table = WorldflowCsvTable::Categories;
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableStarted,
+        0,
+        rows.len(),
+        0,
+    );
     let mut count = 0usize;
-    for row in rows {
+    for (index, row) in rows.iter().enumerate() {
         let id = parse_uuid(&row.id)?;
         let project_id = parse_uuid(&row.project_id)?;
         let parent_id = parse_opt_uuid(&row.parent_id)?;
@@ -976,13 +1065,42 @@ async fn insert_categories(conn: &mut SqliteConnection, rows: &[CategoryRow]) ->
         .await?
         .rows_affected();
         count += n as usize;
+        emit_import_progress(
+            progress,
+            table,
+            CsvImportProgressPhase::RowProcessed,
+            index + 1,
+            rows.len(),
+            count,
+        );
     }
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableFinished,
+        rows.len(),
+        rows.len(),
+        count,
+    );
     Ok(count)
 }
 
-async fn insert_tag_schemas(conn: &mut SqliteConnection, rows: &[TagSchemaRow]) -> Result<usize> {
+async fn insert_tag_schemas(
+    conn: &mut SqliteConnection,
+    rows: &[TagSchemaRow],
+    progress: &mut impl FnMut(CsvImportProgress),
+) -> Result<usize> {
+    let table = WorldflowCsvTable::TagSchemas;
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableStarted,
+        0,
+        rows.len(),
+        0,
+    );
     let mut count = 0usize;
-    for row in rows {
+    for (index, row) in rows.iter().enumerate() {
         let id = parse_uuid(&row.id)?;
         let project_id = parse_uuid(&row.project_id)?;
         let sort_order = parse_i64(&row.sort_order)?;
@@ -1010,13 +1128,42 @@ async fn insert_tag_schemas(conn: &mut SqliteConnection, rows: &[TagSchemaRow]) 
         .await?
         .rows_affected();
         count += n as usize;
+        emit_import_progress(
+            progress,
+            table,
+            CsvImportProgressPhase::RowProcessed,
+            index + 1,
+            rows.len(),
+            count,
+        );
     }
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableFinished,
+        rows.len(),
+        rows.len(),
+        count,
+    );
     Ok(count)
 }
 
-async fn insert_entry_types(conn: &mut SqliteConnection, rows: &[EntryTypeRow]) -> Result<usize> {
+async fn insert_entry_types(
+    conn: &mut SqliteConnection,
+    rows: &[EntryTypeRow],
+    progress: &mut impl FnMut(CsvImportProgress),
+) -> Result<usize> {
+    let table = WorldflowCsvTable::EntryTypes;
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableStarted,
+        0,
+        rows.len(),
+        0,
+    );
     let mut count = 0usize;
-    for row in rows {
+    for (index, row) in rows.iter().enumerate() {
         let id = parse_uuid(&row.id)?;
         let project_id = parse_uuid(&row.project_id)?;
         let n = sqlx::query(
@@ -1036,13 +1183,42 @@ async fn insert_entry_types(conn: &mut SqliteConnection, rows: &[EntryTypeRow]) 
         .await?
         .rows_affected();
         count += n as usize;
+        emit_import_progress(
+            progress,
+            table,
+            CsvImportProgressPhase::RowProcessed,
+            index + 1,
+            rows.len(),
+            count,
+        );
     }
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableFinished,
+        rows.len(),
+        rows.len(),
+        count,
+    );
     Ok(count)
 }
 
-async fn insert_entries(conn: &mut SqliteConnection, rows: &[EntryRow]) -> Result<usize> {
+async fn insert_entries(
+    conn: &mut SqliteConnection,
+    rows: &[EntryRow],
+    progress: &mut impl FnMut(CsvImportProgress),
+) -> Result<usize> {
+    let table = WorldflowCsvTable::Entries;
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableStarted,
+        0,
+        rows.len(),
+        0,
+    );
     let mut count = 0usize;
-    for row in rows {
+    for (index, row) in rows.iter().enumerate() {
         let id = parse_uuid(&row.id)?;
         let project_id = parse_uuid(&row.project_id)?;
         let category_id = parse_opt_uuid(&row.category_id)?;
@@ -1068,16 +1244,42 @@ async fn insert_entries(conn: &mut SqliteConnection, rows: &[EntryRow]) -> Resul
         .await?
         .rows_affected();
         count += n as usize;
+        emit_import_progress(
+            progress,
+            table,
+            CsvImportProgressPhase::RowProcessed,
+            index + 1,
+            rows.len(),
+            count,
+        );
     }
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableFinished,
+        rows.len(),
+        rows.len(),
+        count,
+    );
     Ok(count)
 }
 
 async fn insert_entry_relations(
     conn: &mut SqliteConnection,
     rows: &[EntryRelationRow],
+    progress: &mut impl FnMut(CsvImportProgress),
 ) -> Result<usize> {
+    let table = WorldflowCsvTable::EntryRelations;
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableStarted,
+        0,
+        rows.len(),
+        0,
+    );
     let mut count = 0usize;
-    for row in rows {
+    for (index, row) in rows.iter().enumerate() {
         let id = parse_uuid(&row.id)?;
         let project_id = parse_uuid(&row.project_id)?;
         let a_id = parse_uuid(&row.a_id)?;
@@ -1099,13 +1301,42 @@ async fn insert_entry_relations(
         .await?
         .rows_affected();
         count += n as usize;
+        emit_import_progress(
+            progress,
+            table,
+            CsvImportProgressPhase::RowProcessed,
+            index + 1,
+            rows.len(),
+            count,
+        );
     }
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableFinished,
+        rows.len(),
+        rows.len(),
+        count,
+    );
     Ok(count)
 }
 
-async fn insert_entry_links(conn: &mut SqliteConnection, rows: &[EntryLinkRow]) -> Result<usize> {
+async fn insert_entry_links(
+    conn: &mut SqliteConnection,
+    rows: &[EntryLinkRow],
+    progress: &mut impl FnMut(CsvImportProgress),
+) -> Result<usize> {
+    let table = WorldflowCsvTable::EntryLinks;
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableStarted,
+        0,
+        rows.len(),
+        0,
+    );
     let mut count = 0usize;
-    for row in rows {
+    for (index, row) in rows.iter().enumerate() {
         let id = parse_uuid(&row.id)?;
         let project_id = parse_uuid(&row.project_id)?;
         let a_id = parse_uuid(&row.a_id)?;
@@ -1124,13 +1355,42 @@ async fn insert_entry_links(conn: &mut SqliteConnection, rows: &[EntryLinkRow]) 
         .await?
         .rows_affected();
         count += n as usize;
+        emit_import_progress(
+            progress,
+            table,
+            CsvImportProgressPhase::RowProcessed,
+            index + 1,
+            rows.len(),
+            count,
+        );
     }
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableFinished,
+        rows.len(),
+        rows.len(),
+        count,
+    );
     Ok(count)
 }
 
-async fn insert_idea_notes(conn: &mut SqliteConnection, rows: &[IdeaNoteRow]) -> Result<usize> {
+async fn insert_idea_notes(
+    conn: &mut SqliteConnection,
+    rows: &[IdeaNoteRow],
+    progress: &mut impl FnMut(CsvImportProgress),
+) -> Result<usize> {
+    let table = WorldflowCsvTable::IdeaNotes;
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableStarted,
+        0,
+        rows.len(),
+        0,
+    );
     let mut count = 0usize;
-    for row in rows {
+    for (index, row) in rows.iter().enumerate() {
         let id = parse_uuid(&row.id)?;
         let project_id = parse_opt_uuid(&row.project_id)?;
         let converted_entry_id = parse_opt_uuid(&row.converted_entry_id)?;
@@ -1155,7 +1415,23 @@ async fn insert_idea_notes(conn: &mut SqliteConnection, rows: &[IdeaNoteRow]) ->
         .await?
         .rows_affected();
         count += n as usize;
+        emit_import_progress(
+            progress,
+            table,
+            CsvImportProgressPhase::RowProcessed,
+            index + 1,
+            rows.len(),
+            count,
+        );
     }
+    emit_import_progress(
+        progress,
+        table,
+        CsvImportProgressPhase::TableFinished,
+        rows.len(),
+        rows.len(),
+        count,
+    );
     Ok(count)
 }
 
@@ -1192,6 +1468,19 @@ impl SqliteDb {
         mode: CsvImportMode,
     ) -> Result<CsvImportResult> {
         import_all_bytes(&self.pool, all_csv_bytes_from_bundle(bundle)?, mode).await
+    }
+
+    pub async fn import_csvs_with_progress<F>(
+        &self,
+        bundle: CsvImportBundle,
+        mode: CsvImportMode,
+        progress: F,
+    ) -> Result<CsvImportResult>
+    where
+        F: FnMut(CsvImportProgress),
+    {
+        import_all_bytes_with_progress(&self.pool, all_csv_bytes_from_bundle(bundle)?, mode, progress)
+            .await
     }
 
     pub fn worldflow_schema_version(&self) -> u32 {
@@ -1356,6 +1645,44 @@ mod tests {
         assert_eq!(second.projects, 0);
         assert_eq!(second.entries, 0);
         assert_eq!(target.get_project(&project_id).await?.name, "本地改名");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn import_csvs_with_progress_reports_tables_and_rows() -> Result<()> {
+        let (_source_temp, source) = new_test_db("progress_source").await?;
+        let project_id = seed_project(&source, "进度源项目").await?;
+        seed_entry(&source, project_id, "进度词条").await?;
+        let bundle = bundle_from_items(source.export_all_csvs().await?);
+
+        let (_target_temp, target) = new_test_db("progress_target").await?;
+        let mut events = Vec::<CsvImportProgress>::new();
+        let result = target
+            .import_csvs_with_progress(bundle, CsvImportMode::Merge, |event| {
+                events.push(event);
+            })
+            .await?;
+
+        assert_eq!(result.projects, 1);
+        assert_eq!(result.entries, 1);
+        let started_tables = events
+            .iter()
+            .filter(|event| event.phase == CsvImportProgressPhase::TableStarted)
+            .map(|event| event.table)
+            .collect::<Vec<_>>();
+        assert_eq!(started_tables, WorldflowCsvTable::ordered());
+        assert!(events.iter().any(|event| {
+            event.table == WorldflowCsvTable::Entries
+                && event.phase == CsvImportProgressPhase::RowProcessed
+                && event.current == 1
+                && event.total == 1
+                && event.inserted == 1
+        }));
+        assert!(events.iter().any(|event| {
+            event.table == WorldflowCsvTable::Entries
+                && event.phase == CsvImportProgressPhase::TableFinished
+                && event.current == event.total
+        }));
         Ok(())
     }
 
