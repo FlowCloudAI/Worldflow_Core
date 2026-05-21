@@ -2,7 +2,7 @@
 
 > **注意**：本文档描述的数据类型和交互模式最初基于 REST API 设计。当前实际传输层使用 **Tauri invoke** 而非 HTTP REST。以下
 > TypeScript 类型定义仍可作为前端开发的类型参考，但实际调用方式应通过 `@tauri-apps/api/core` 的 `invoke()` 实现，而非
-`fetch()`。具体 Tauri 命令请参考 `App/src-tauri/src/apis/worldflow/` 下的模块。
+`fetch()`。具体 Tauri 命令请参考 `app_main/src-tauri/src/apis/worldflow/` 下的模块。
 
 ## 核心实体关系
 

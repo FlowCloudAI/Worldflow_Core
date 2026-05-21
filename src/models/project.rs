@@ -1,4 +1,4 @@
-// worldflow_core/src/models/project.rs——项目模型
+// core_world_data/src/models/project.rs——项目模型
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

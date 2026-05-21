@@ -1,4 +1,4 @@
-// worldflow_core/src/models/tag_schema.rs——标签模式模型
+// core_world_data/src/models/tag_schema.rs——标签模式模型
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
