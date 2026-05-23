@@ -16,6 +16,13 @@ pub use db::SqliteDb;
 #[cfg(feature = "sqlite")]
 pub use db::api_usage::{insert_api_usage, query_usage_by_model, query_usage_summary};
 
+#[cfg(feature = "sqlite")]
+pub use db::csv_bundle::{
+    CsvExportItem, CsvExportScope, CsvImportBundle, CsvImportItem, CsvImportMode,
+    CsvImportProgress, CsvImportProgressPhase, CsvImportResult, ProjectCsvExport,
+    WorldflowCsvTable,
+};
+
 #[cfg(all(feature = "sqlite", feature = "snapshot"))]
 pub use db::snapshot::{
     AppendResult, RestoreMode, SnapshotBranchInfo, SnapshotConfig, SnapshotInfo,
