@@ -15,11 +15,9 @@
 | `src/models/mod.rs`                 | 修改 | 注册 idea_note 模块并 re-export          |
 | `src/db/traits.rs`                  | 修改 | 新增 IdeaNoteOps trait，纳入 Db 组合 trait |
 | `src/db/idea_note.rs`               | 新增 | SQLite 实现                           |
-| `src/db/pg_idea_note.rs`            | 新增 | PostgreSQL 实现                       |
-| `src/db/mod.rs`                     | 修改 | 注册 idea_note / pg_idea_note 模块      |
+| `src/db/mod.rs`                     | 修改 | 注册 idea_note 模块                    |
 | `src/lib.rs`                        | 修改 | 对外导出 IdeaNoteOps                    |
 | `migrations/0003_idea_notes.sql`    | 新增 | SQLite 建表迁移                         |
-| `migrations_pg/0003_idea_notes.sql` | 新增 | PostgreSQL 建表迁移                     |
 | `tests/db.rs`                       | 修改 | 追加 16 个 IdeaNote 集成测试               |
 
 ---
@@ -114,7 +112,7 @@ pub trait IdeaNoteOps: Send + Sync {
 }
 ```
 
-已纳入 `Db` 组合 trait，`SqliteDb` 和 `PgDb` 均实现。
+已纳入 `Db` 组合 trait，并由 `SqliteDb` 实现。
 
 ---
 
@@ -129,15 +127,6 @@ pub trait IdeaNoteOps: Send + Sync {
 - `pinned` 存为 INTEGER 0/1，有 CHECK 约束
 - `AFTER UPDATE` 触发器自动更新 `updated_at`
 - 6 个索引：`project_id`, `status`, `updated_at`, `pinned`, `(project_id, status)`, `(pinned DESC, updated_at DESC)`
-
-### PostgreSQL（migrations_pg/0003_idea_notes.sql）
-
-- 与 SQLite 结构等价，使用 PG 原生类型
-- `pinned` 为 `BOOLEAN`
-- 时间字段为 `TIMESTAMPTZ`
-- 使用 `BEFORE UPDATE` 触发器更新 `updated_at`
-
----
 
 ## 列表排序规则
 
@@ -179,4 +168,3 @@ ORDER BY pinned DESC, updated_at DESC
 1. **"转词条"业务逻辑未实现**：`converted_entry_id` 字段已预留，但从 IdeaNote 创建 Entry 的逻辑需上层处理。
 2. **`last_reviewed_at` 更新**：字段存在但尚无专门的"标记为已读"接口，可在 update 时传入。
 3. **搜索**：当前无全文搜索支持，如有需要可参考 `entries_fts` 的做法另建 FTS 虚拟表。
-4. **PG 时间戳解码**：PG 端 `created_at`/`updated_at` 等 TIMESTAMPTZ 字段在模型中以 `String` 接收，与现有 Entry 实现保持一致。

@@ -5,9 +5,6 @@ pub mod traits;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 
-#[cfg(feature = "postgres")]
-pub mod postgres;
-
 // ── SQLite 实现 ──────────────────────────────────────────
 #[cfg(feature = "sqlite")]
 mod category;
@@ -347,46 +344,5 @@ mod tests {
             .await
             .expect_err("真实迁移差异不应被自动修复");
         assert!(error.to_string().contains("migration 1"));
-    }
-}
-
-// ── PostgreSQL 实现 ──────────────────────────────────────
-#[cfg(feature = "postgres")]
-mod pg_category;
-#[cfg(feature = "postgres")]
-mod pg_entry;
-#[cfg(feature = "postgres")]
-mod pg_entry_link;
-#[cfg(feature = "postgres")]
-mod pg_entry_relation;
-#[cfg(feature = "postgres")]
-mod pg_entry_type;
-#[cfg(feature = "postgres")]
-mod pg_idea_note;
-#[cfg(feature = "postgres")]
-mod pg_project;
-#[cfg(feature = "postgres")]
-mod pg_tag_schema;
-
-#[cfg(feature = "postgres")]
-use sqlx::{PgPool, postgres::PgPoolOptions};
-
-#[cfg(feature = "postgres")]
-#[derive(Clone, Debug)]
-pub struct PgDb {
-    pub pool: PgPool,
-}
-
-#[cfg(feature = "postgres")]
-impl PgDb {
-    pub async fn new(database_url: &str) -> Result<Self> {
-        let pool = PgPoolOptions::new()
-            .max_connections(10)
-            .connect(database_url)
-            .await?;
-
-        sqlx::migrate!("./migrations_pg").run(&pool).await?;
-
-        Ok(Self { pool })
     }
 }

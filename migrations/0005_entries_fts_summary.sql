@@ -1,4 +1,4 @@
--- 将 summary 纳入 SQLite FTS，保持与 PostgreSQL 搜索字段一致。
+-- 将 summary 纳入 SQLite FTS，使全文搜索覆盖 title + summary + content。
 DROP TRIGGER IF EXISTS entries_fts_insert;
 DROP TRIGGER IF EXISTS entries_fts_update;
 DROP TRIGGER IF EXISTS entries_fts_delete;

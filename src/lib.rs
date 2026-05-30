@@ -27,6 +27,3 @@ pub use db::csv_bundle::{
 pub use db::snapshot::{
     AppendResult, RestoreMode, SnapshotBranchInfo, SnapshotConfig, SnapshotInfo,
 };
-
-#[cfg(feature = "postgres")]
-pub use db::PgDb;

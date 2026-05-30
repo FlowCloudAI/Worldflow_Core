@@ -16,7 +16,7 @@
 - `Some(None)`：清空词条摘要，写入数据库 `NULL`。
 - `Some(Some(value))`：写入新的摘要字符串，允许真实空字符串 `""`。
 
-SQLite 与 PostgreSQL 的更新 SQL 已统一为三态语义。旧调用方如果只是构造 `Some(text)`，需要改成 `Some(Some(text))`；如果需要清空字段，传 `Some(None)`。
+SQLite 更新 SQL 已统一为三态语义。旧调用方如果只是构造 `Some(text)`，需要改成 `Some(Some(text))`；如果需要清空字段，传 `Some(None)`。
 
 ## Snapshot 改为手动触发
 
@@ -50,7 +50,7 @@ Snapshot 不再承诺写操作后自动创建快照，也不再保留内部 fire
 
 ## SQLite 搜索摘要字段
 
-SQLite FTS 新增 `summary` 字段，并通过 `0005_entries_fts_summary.sql` 迁移重建 FTS 表和触发器。长度大于等于 3 的 SQLite 搜索现在会与 PostgreSQL 一样命中 `title + summary + content`。
+SQLite FTS 新增 `summary` 字段，并通过 `0005_entries_fts_summary.sql` 迁移重建 FTS 表和触发器。长度大于等于 3 的 SQLite 搜索现在会命中 `title + summary + content`。
 
 已有数据库升级时会回填当前 `entries.summary` 到 FTS 表；后续 insert/update/delete 由触发器同步。
 
