@@ -58,6 +58,15 @@ fn escape_like_pattern(input: &str) -> String {
         .replace('_', "\\_")
 }
 
+fn escape_fts5_phrase(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    Some(format!("\"{}\"", trimmed.replace('"', "\"\"")))
+}
+
 async fn validate_entry_type(db: &SqliteDb, project_id: &Uuid, typ: Option<&str>) -> Result<()> {
     let Some(typ) = typ else {
         return Ok(());
@@ -230,6 +239,9 @@ impl EntryOps for SqliteDb {
         // FTS 子查询只做 MATCH + LIMIT，LIMIT 才能真正在扫描阶段提前截断候选集。
         // project_id 过滤留在外层 WHERE，走主表 B-tree 索引。
         // 4 倍于最终结果数，上限 500，兼顾 sparse（不过度扫描）和 dense（不爆炸）。
+        let Some(fts_query) = escape_fts5_phrase(query) else {
+            return Ok(Vec::new());
+        };
         let fts_limit = super::checked_scaled_limit(limit, 4, 0, 500)?;
         let mut sql = "SELECT id, project_id, category_id, title, summary, type, cover_path, updated_at
                        FROM entries
@@ -245,7 +257,7 @@ impl EntryOps for SqliteDb {
 
         let mut q = sqlx::query(&sql)
             .bind(project_id)
-            .bind(query)
+            .bind(fts_query)
             .bind(fts_limit);
         if let Some(cid) = filter.category_id {
             q = q.bind(cid);

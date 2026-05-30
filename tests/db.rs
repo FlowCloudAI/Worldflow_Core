@@ -379,6 +379,47 @@ async fn test_search_entries_matches_summary_with_fts() {
 }
 
 #[tokio::test]
+async fn test_search_entries_treats_fts_special_chars_as_text() {
+    let db = setup().await;
+
+    let project = db
+        .create_project(CreateProject {
+            cover_image: None,
+            name: "FTS 特殊字符项目".to_string(),
+            description: None,
+        })
+        .await
+        .unwrap();
+
+    let entry = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: None,
+            title: "foo\"bar a:b AND 星*门".to_string(),
+            summary: Some("包含 FTS5 语法字符的摘要".to_string()),
+            content: Some("普通正文".to_string()),
+            r#type: None,
+            tags: None,
+            images: None,
+            cover_path: None,
+        })
+        .await
+        .unwrap();
+
+    for query in ["foo\"bar", "a:b", "AND", "星*门", "*"] {
+        let results = db
+            .search_entries(&project.id, query, EntryFilter::default(), 20)
+            .await
+            .unwrap_or_else(|error| panic!("查询 {query:?} 不应触发 FTS5 语法错误: {error}"));
+
+        assert!(
+            results.iter().any(|item| item.id == entry.id),
+            "查询 {query:?} 应按普通文本命中词条"
+        );
+    }
+}
+
+#[tokio::test]
 async fn test_inspect_data() {
     let db = setup().await;
 
