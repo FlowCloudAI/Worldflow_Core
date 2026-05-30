@@ -1,3 +1,4 @@
+use sqlx::Row;
 use std::{env, path::PathBuf};
 use uuid::Uuid;
 use worldflow_core::models::EntryFilter;
@@ -13,6 +14,242 @@ async fn setup() -> SqliteDb {
         .replace('\\', "/");
     let db_url = format!("sqlite:{db_path}?mode=rwc");
     SqliteDb::new(&db_url).await.unwrap()
+}
+
+fn quote_ident(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+async fn table_columns(db: &SqliteDb, table: &str) -> Vec<String> {
+    let sql = format!("PRAGMA table_info({})", quote_ident(table));
+    sqlx::query(&sql)
+        .fetch_all(&db.pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.try_get::<String, _>("name").unwrap())
+        .collect()
+}
+
+async fn assert_table_columns(db: &SqliteDb, table: &str, expected: &[&str]) {
+    let columns = table_columns(db, table).await;
+    for column in expected {
+        assert!(
+            columns.iter().any(|existing| existing == column),
+            "{table} 缺少列 {column}，当前列: {columns:?}"
+        );
+    }
+}
+
+async fn assert_schema_object_exists(db: &SqliteDb, kind: &str, name: &str) {
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(1) FROM sqlite_master WHERE type = ? AND name = ?")
+            .bind(kind)
+            .bind(name)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+
+    assert_eq!(count, 1, "缺少 {kind} {name}");
+}
+
+async fn assert_representative_query(db: &SqliteDb, sql: &str) {
+    sqlx::query(sql).fetch_all(&db.pool).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_sqlite_schema_smoke_matches_hot_queries() {
+    let db = setup().await;
+
+    assert_table_columns(
+        &db,
+        "projects",
+        &[
+            "id",
+            "name",
+            "description",
+            "cover_image",
+            "created_at",
+            "updated_at",
+        ],
+    )
+    .await;
+    assert_table_columns(
+        &db,
+        "categories",
+        &[
+            "id",
+            "project_id",
+            "parent_id",
+            "name",
+            "sort_order",
+            "created_at",
+            "updated_at",
+        ],
+    )
+    .await;
+    assert_table_columns(
+        &db,
+        "tag_schemas",
+        &[
+            "id",
+            "project_id",
+            "name",
+            "description",
+            "type",
+            "target",
+            "default_val",
+            "range_min",
+            "range_max",
+            "sort_order",
+            "created_at",
+            "updated_at",
+        ],
+    )
+    .await;
+    assert_table_columns(
+        &db,
+        "entries",
+        &[
+            "_rowid",
+            "id",
+            "project_id",
+            "category_id",
+            "title",
+            "summary",
+            "content",
+            "type",
+            "tags",
+            "images",
+            "cover_path",
+            "created_at",
+            "updated_at",
+        ],
+    )
+    .await;
+    assert_table_columns(
+        &db,
+        "entries_fts",
+        &["title", "summary", "content", "project_id"],
+    )
+    .await;
+    assert_table_columns(
+        &db,
+        "entry_relations",
+        &[
+            "id",
+            "project_id",
+            "a_id",
+            "b_id",
+            "relation",
+            "content",
+            "created_at",
+            "updated_at",
+        ],
+    )
+    .await;
+    assert_table_columns(
+        &db,
+        "entry_types",
+        &[
+            "id",
+            "project_id",
+            "name",
+            "description",
+            "icon",
+            "color",
+            "created_at",
+            "updated_at",
+        ],
+    )
+    .await;
+    assert_table_columns(
+        &db,
+        "entry_links",
+        &["id", "project_id", "a_id", "b_id", "created_at"],
+    )
+    .await;
+    assert_table_columns(
+        &db,
+        "idea_notes",
+        &[
+            "id",
+            "project_id",
+            "content",
+            "title",
+            "status",
+            "pinned",
+            "created_at",
+            "updated_at",
+            "last_reviewed_at",
+            "converted_entry_id",
+        ],
+    )
+    .await;
+    assert_table_columns(
+        &db,
+        "api_usage_log",
+        &[
+            "id",
+            "session_id",
+            "model",
+            "provider",
+            "modality",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "created_at",
+        ],
+    )
+    .await;
+
+    for index in [
+        "idx_entries_project",
+        "idx_entries_category",
+        "idx_entries_type",
+        "idx_entries_project_updated",
+        "idx_entries_project_category_updated",
+        "idx_entries_project_type_updated",
+        "idx_categories_project",
+        "idx_categories_parent",
+        "idx_tag_schemas_project",
+        "idx_relations_a",
+        "idx_relations_b",
+        "idx_relations_project",
+        "idx_entry_types_project",
+        "idx_entry_types_name",
+        "idx_entry_links_a",
+        "idx_entry_links_b",
+        "idx_entry_links_project",
+        "idx_idea_notes_project",
+        "idx_idea_notes_status",
+        "idx_idea_notes_updated_at",
+        "idx_idea_notes_pinned",
+        "idx_idea_notes_project_status",
+        "idx_idea_notes_pinned_updated",
+        "idx_api_usage_session",
+        "idx_api_usage_model",
+        "idx_api_usage_created",
+        "idx_api_usage_provider",
+        "idx_api_usage_modality",
+    ] {
+        assert_schema_object_exists(&db, "index", index).await;
+    }
+
+    for sql in [
+        "SELECT id, name, description, cover_image, created_at, updated_at FROM projects ORDER BY updated_at DESC LIMIT 1",
+        "SELECT id, project_id, parent_id, name, sort_order, created_at, updated_at FROM categories WHERE project_id = zeroblob(16) ORDER BY sort_order, name",
+        "SELECT id, project_id, name, description, type, target, default_val, range_min, range_max, sort_order, created_at, updated_at FROM tag_schemas WHERE project_id = zeroblob(16) ORDER BY sort_order, name",
+        "SELECT _rowid, id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at, updated_at FROM entries WHERE project_id = zeroblob(16) ORDER BY updated_at DESC LIMIT 1",
+        "SELECT rowid, title, summary, content, project_id FROM entries_fts WHERE entries_fts MATCH 'schema' LIMIT 1",
+        "SELECT id, project_id, name, description, icon, color, created_at, updated_at FROM entry_types WHERE project_id = zeroblob(16) ORDER BY name",
+        "SELECT id, project_id, a_id, b_id, created_at FROM entry_links WHERE project_id = zeroblob(16) LIMIT 1",
+        "SELECT id, project_id, a_id, b_id, relation, content, created_at, updated_at FROM entry_relations WHERE project_id = zeroblob(16) LIMIT 1",
+        "SELECT id, project_id, content, title, status, pinned, created_at, updated_at, last_reviewed_at, converted_entry_id FROM idea_notes ORDER BY pinned DESC, updated_at DESC LIMIT 1",
+        "SELECT id, session_id, model, provider, modality, prompt_tokens, completion_tokens, total_tokens, created_at FROM api_usage_log ORDER BY created_at DESC LIMIT 1",
+    ] {
+        assert_representative_query(&db, sql).await;
+    }
 }
 
 #[tokio::test]
