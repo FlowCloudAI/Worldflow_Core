@@ -8,8 +8,10 @@ use crate::{
     },
 };
 use sqlx::Row;
-use std::path::PathBuf;
+use std::{collections::HashSet, path::PathBuf};
 use uuid::Uuid;
+
+const MAX_ENTRY_TYPE_VALIDATION_PAIRS_PER_QUERY: usize = 400;
 
 fn row_to_entry(row: &sqlx::sqlite::SqliteRow) -> Result<Entry> {
     let tags_str: String = row.try_get("tags")?;
@@ -67,6 +69,10 @@ fn escape_fts5_phrase(input: &str) -> Option<String> {
     Some(format!("\"{}\"", trimmed.replace('"', "\"\"")))
 }
 
+fn custom_entry_type_not_found_error() -> WorldflowError {
+    WorldflowError::InvalidInput("自定义词条类型不存在或不属于当前项目".to_string())
+}
+
 async fn validate_entry_type(db: &SqliteDb, project_id: &Uuid, typ: Option<&str>) -> Result<()> {
     let Some(typ) = typ else {
         return Ok(());
@@ -82,10 +88,59 @@ async fn validate_entry_type(db: &SqliteDb, project_id: &Uuid, typ: Option<&str>
             .await?;
     let cnt: i64 = row.try_get("cnt")?;
     if cnt == 0 {
-        return Err(WorldflowError::InvalidInput(
-            "自定义词条类型不存在或不属于当前项目".to_string(),
-        ));
+        return Err(custom_entry_type_not_found_error());
     }
+    Ok(())
+}
+
+async fn validate_entry_types_bulk(db: &SqliteDb, inputs: &[CreateEntry]) -> Result<()> {
+    let mut custom_types = HashSet::new();
+
+    for input in inputs {
+        let Some(typ) = input.r#type.as_deref() else {
+            continue;
+        };
+        let Ok(type_id) = Uuid::parse_str(typ) else {
+            validate_builtin_type_key(typ)?;
+            continue;
+        };
+
+        custom_types.insert((input.project_id, type_id));
+    }
+
+    if custom_types.is_empty() {
+        return Ok(());
+    }
+
+    let custom_type_pairs = custom_types.into_iter().collect::<Vec<_>>();
+    let mut found_types: HashSet<(Uuid, Uuid)> = HashSet::with_capacity(custom_type_pairs.len());
+
+    for chunk in custom_type_pairs.chunks(MAX_ENTRY_TYPE_VALIDATION_PAIRS_PER_QUERY) {
+        let mut sql = String::from("SELECT project_id, id FROM entry_types WHERE ");
+        for index in 0..chunk.len() {
+            if index > 0 {
+                sql.push_str(" OR ");
+            }
+            sql.push_str("(project_id = ? AND id = ?)");
+        }
+
+        let mut query = sqlx::query(&sql);
+        for pair in chunk {
+            query = query.bind(&pair.0).bind(&pair.1);
+        }
+
+        let rows = query.fetch_all(&db.pool).await?;
+        for row in rows {
+            let project_id: Uuid = row.try_get("project_id")?;
+            let type_id: Uuid = row.try_get("id")?;
+            found_types.insert((project_id, type_id));
+        }
+    }
+
+    if found_types.len() != custom_type_pairs.len() {
+        return Err(custom_entry_type_not_found_error());
+    }
+
     Ok(())
 }
 
@@ -335,12 +390,12 @@ impl EntryOps for SqliteDb {
     }
 
     async fn create_entries_bulk(&self, inputs: Vec<CreateEntry>) -> Result<usize> {
+        validate_entry_types_bulk(self, &inputs).await?;
+
         let mut tx = self.pool.begin().await?;
         let mut count = 0;
 
         for input in inputs {
-            validate_entry_type(self, &input.project_id, input.r#type.as_deref()).await?;
-
             let id = Uuid::now_v7();
             let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
             let images = serde_json::to_string(&input.images.as_deref().unwrap_or_default())?;

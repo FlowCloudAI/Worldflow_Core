@@ -1296,6 +1296,135 @@ async fn test_entry_type_validation_rejects_invalid_and_cross_project() {
 }
 
 #[tokio::test]
+async fn test_create_entries_bulk_validates_types_by_project_and_type() {
+    let db = setup().await;
+
+    let project1 = db
+        .create_project(CreateProject {
+            cover_image: None,
+            name: "批量类型校验项目1".to_string(),
+            description: None,
+        })
+        .await
+        .unwrap();
+    let project2 = db
+        .create_project(CreateProject {
+            cover_image: None,
+            name: "批量类型校验项目2".to_string(),
+            description: None,
+        })
+        .await
+        .unwrap();
+
+    let custom_type = db
+        .create_entry_type(CreateCustomEntryType {
+            project_id: project1.id,
+            name: "批量专属类型".to_string(),
+            description: None,
+            icon: None,
+            color: None,
+        })
+        .await
+        .unwrap();
+
+    let invalid_builtin = db
+        .create_entries_bulk(vec![CreateEntry {
+            project_id: project1.id,
+            category_id: None,
+            title: "批量非法内置类型".to_string(),
+            summary: None,
+            content: None,
+            r#type: Some("unknown_type".to_string()),
+            tags: None,
+            images: None,
+            cover_path: None,
+        }])
+        .await;
+    assert!(invalid_builtin.is_err(), "批量创建应拒绝未知内置类型 key");
+
+    let cross_project = db
+        .create_entries_bulk(vec![CreateEntry {
+            project_id: project2.id,
+            category_id: None,
+            title: "批量跨项目类型".to_string(),
+            summary: None,
+            content: None,
+            r#type: Some(custom_type.id.to_string()),
+            tags: None,
+            images: None,
+            cover_path: None,
+        }])
+        .await;
+    assert!(cross_project.is_err(), "批量创建应拒绝其他项目的自定义类型");
+
+    let custom_type_id = custom_type.id.to_string();
+    let created_count = db
+        .create_entries_bulk(vec![
+            CreateEntry {
+                project_id: project1.id,
+                category_id: None,
+                title: "批量自定义类型1".to_string(),
+                summary: None,
+                content: None,
+                r#type: Some(custom_type_id.clone()),
+                tags: None,
+                images: None,
+                cover_path: None,
+            },
+            CreateEntry {
+                project_id: project1.id,
+                category_id: None,
+                title: "批量自定义类型2".to_string(),
+                summary: None,
+                content: None,
+                r#type: Some(custom_type_id.clone()),
+                tags: None,
+                images: None,
+                cover_path: None,
+            },
+            CreateEntry {
+                project_id: project1.id,
+                category_id: None,
+                title: "批量内置类型".to_string(),
+                summary: None,
+                content: None,
+                r#type: Some("character".to_string()),
+                tags: None,
+                images: None,
+                cover_path: None,
+            },
+            CreateEntry {
+                project_id: project1.id,
+                category_id: None,
+                title: "批量无类型".to_string(),
+                summary: None,
+                content: None,
+                r#type: None,
+                tags: None,
+                images: None,
+                cover_path: None,
+            },
+        ])
+        .await
+        .unwrap();
+    assert_eq!(created_count, 4);
+
+    let custom_entries = db
+        .list_entries(
+            &project1.id,
+            EntryFilter {
+                entry_type: Some(custom_type_id.as_str()),
+                ..Default::default()
+            },
+            100,
+            0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(custom_entries.len(), 2);
+}
+
+#[tokio::test]
 async fn test_cascade_delete_on_project_delete() {
     let db = setup().await;
 
