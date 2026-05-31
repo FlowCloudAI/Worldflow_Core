@@ -306,6 +306,38 @@ async fn test_project_crud() {
 }
 
 #[tokio::test]
+async fn test_create_project_with_default_timeline_tags() {
+    let db = setup().await;
+
+    let project = db
+        .create_project_with_default_timeline_tags(CreateProject {
+            cover_image: None,
+            name: "默认时间线标签项目".to_string(),
+            description: Some("测试默认标签事务".to_string()),
+        })
+        .await
+        .unwrap();
+
+    let schemas = db.list_tag_schemas(&project.id).await.unwrap();
+    assert_eq!(schemas.len(), 4);
+    assert_eq!(
+        schemas
+            .iter()
+            .map(|schema| schema.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["开始年份", "结束年份", "父事件ID", "时间线"]
+    );
+    assert!(schemas.iter().all(|schema| schema.target == "[\"event\"]"));
+
+    let timeline_schema = schemas
+        .iter()
+        .find(|schema| schema.name == "时间线")
+        .unwrap();
+    assert_eq!(timeline_schema.r#type, "boolean");
+    assert_eq!(timeline_schema.default_val.as_deref(), Some("true"));
+}
+
+#[tokio::test]
 async fn test_category_tree() {
     let db = setup().await;
 

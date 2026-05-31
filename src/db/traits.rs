@@ -4,6 +4,10 @@ use uuid::Uuid;
 
 pub trait ProjectOps: Send + Sync {
     async fn create_project(&self, input: CreateProject) -> Result<Project>;
+    async fn create_project_with_default_timeline_tags(
+        &self,
+        input: CreateProject,
+    ) -> Result<Project>;
     async fn get_project(&self, id: &Uuid) -> Result<Project>;
     async fn list_projects(&self) -> Result<Vec<Project>>;
     async fn update_project(&self, id: &Uuid, input: UpdateProject) -> Result<Project>;
