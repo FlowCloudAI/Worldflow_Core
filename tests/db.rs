@@ -708,6 +708,110 @@ async fn test_entry_with_tags() {
 }
 
 #[tokio::test]
+async fn test_entry_tag_single_upsert_and_remove_are_atomic_operations() {
+    let db = setup().await;
+
+    let project = db
+        .create_project(CreateProject {
+            cover_image: None,
+            name: "单项标签事务测试".to_string(),
+            description: None,
+        })
+        .await
+        .unwrap();
+
+    let schema_a = db
+        .create_tag_schema(CreateTagSchema {
+            project_id: project.id,
+            name: "阵营".to_string(),
+            description: None,
+            r#type: "string".to_string(),
+            target: vec!["character".to_string()],
+            default_val: None,
+            range_min: None,
+            range_max: None,
+            sort_order: Some(0),
+        })
+        .await
+        .unwrap();
+    let schema_b = db
+        .create_tag_schema(CreateTagSchema {
+            project_id: project.id,
+            name: "等级".to_string(),
+            description: None,
+            r#type: "number".to_string(),
+            target: vec!["character".to_string()],
+            default_val: None,
+            range_min: None,
+            range_max: None,
+            sort_order: Some(1),
+        })
+        .await
+        .unwrap();
+
+    let entry = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: None,
+            title: "标签目标词条".to_string(),
+            summary: None,
+            content: None,
+            r#type: Some("character".to_string()),
+            tags: Some(vec![EntryTag {
+                schema_id: schema_a.id,
+                value: serde_json::json!("旧阵营"),
+            }]),
+            images: None,
+            cover_path: None,
+        })
+        .await
+        .unwrap();
+
+    let updated = db
+        .upsert_entry_tag(
+            &entry.id,
+            EntryTag {
+                schema_id: schema_a.id,
+                value: serde_json::json!("新阵营"),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.tags.0.len(), 1);
+    assert_eq!(updated.tags.0[0].value, serde_json::json!("新阵营"));
+
+    let appended = db
+        .upsert_entry_tag(
+            &entry.id,
+            EntryTag {
+                schema_id: schema_b.id,
+                value: serde_json::json!(42),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(appended.tags.0.len(), 2);
+    assert!(
+        appended
+            .tags
+            .0
+            .iter()
+            .any(|tag| tag.schema_id == schema_a.id && tag.value == serde_json::json!("新阵营"))
+    );
+    assert!(
+        appended
+            .tags
+            .0
+            .iter()
+            .any(|tag| tag.schema_id == schema_b.id && tag.value == serde_json::json!(42))
+    );
+
+    let removed = db.remove_entry_tag(&entry.id, &schema_a.id).await.unwrap();
+    assert_eq!(removed.tags.0.len(), 1);
+    assert_eq!(removed.tags.0[0].schema_id, schema_b.id);
+}
+
+#[tokio::test]
 async fn test_entry_cover_path_explicit_and_fallback() {
     let db = setup().await;
 

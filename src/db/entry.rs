@@ -5,8 +5,8 @@ use crate::{
     db::SqliteDb,
     error::{Result, WorldflowError},
     models::{
-        CreateEntry, Entry, EntryBrief, EntryFilter, FCImage, RelationDirection, SaveEntryBundle,
-        SaveEntryBundleResult, UpdateEntry, validate_builtin_type_key,
+        CreateEntry, Entry, EntryBrief, EntryFilter, EntryTag, FCImage, RelationDirection,
+        SaveEntryBundle, SaveEntryBundleResult, UpdateEntry, validate_builtin_type_key,
     },
 };
 use sqlx::{Row, Sqlite, Transaction};
@@ -776,5 +776,82 @@ impl EntryOps for SqliteDb {
             incoming_links,
             relations,
         })
+    }
+
+    async fn upsert_entry_tag(&self, id: &Uuid, tag: EntryTag) -> Result<Entry> {
+        let mut tx = self.pool.begin().await?;
+
+        let locked_row = sqlx::query(
+            "UPDATE entries
+             SET tags = tags
+             WHERE id = ?
+             RETURNING id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at, updated_at",
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| super::map_row_not_found(e, format!("entry {id}")))?;
+        let mut tags = row_to_entry(&locked_row)?.tags.0;
+        if let Some(existing) = tags
+            .iter_mut()
+            .find(|existing| existing.schema_id == tag.schema_id)
+        {
+            existing.value = tag.value;
+        } else {
+            tags.push(tag);
+        }
+
+        let tags_json = serde_json::to_string(&tags)?;
+        let row = sqlx::query(
+            "UPDATE entries
+             SET tags = ?
+             WHERE id = ?
+             RETURNING id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at, updated_at",
+        )
+        .bind(tags_json)
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| super::map_row_not_found(e, format!("entry {id}")))?;
+
+        tx.commit().await?;
+        row_to_entry(&row)
+    }
+
+    async fn remove_entry_tag(&self, id: &Uuid, schema_id: &Uuid) -> Result<Entry> {
+        let mut tx = self.pool.begin().await?;
+
+        let locked_row = sqlx::query(
+            "UPDATE entries
+             SET tags = tags
+             WHERE id = ?
+             RETURNING id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at, updated_at",
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| super::map_row_not_found(e, format!("entry {id}")))?;
+        let tags = row_to_entry(&locked_row)?
+            .tags
+            .0
+            .into_iter()
+            .filter(|tag| tag.schema_id != *schema_id)
+            .collect::<Vec<_>>();
+
+        let tags_json = serde_json::to_string(&tags)?;
+        let row = sqlx::query(
+            "UPDATE entries
+             SET tags = ?
+             WHERE id = ?
+             RETURNING id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at, updated_at",
+        )
+        .bind(tags_json)
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| super::map_row_not_found(e, format!("entry {id}")))?;
+
+        tx.commit().await?;
+        row_to_entry(&row)
     }
 }
