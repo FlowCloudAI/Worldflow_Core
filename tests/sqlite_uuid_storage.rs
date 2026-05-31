@@ -28,10 +28,10 @@ async fn sqlite_uuid_is_stored_as_blob16() {
     let row = sqlx::query(
         "SELECT typeof(id) AS id_type, length(id) AS id_len FROM projects WHERE id = ?",
     )
-        .bind(project.id)
-        .fetch_one(&db.pool)
-        .await
-        .unwrap();
+    .bind(project.id)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
 
     let id_type: String = row.try_get("id_type").unwrap();
     let id_len: i64 = row.try_get("id_len").unwrap();

@@ -372,10 +372,7 @@ fn parse_csv_bytes<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<Vec<T>>
     Ok(rows?)
 }
 
-fn build_export_item<T: Serialize>(
-    table: WorldflowCsvTable,
-    rows: &[T],
-) -> Result<CsvExportItem> {
+fn build_export_item<T: Serialize>(table: WorldflowCsvTable, rows: &[T]) -> Result<CsvExportItem> {
     let content = write_csv_string(rows)?;
     Ok(CsvExportItem {
         table,
@@ -785,10 +782,7 @@ pub(in crate::db) async fn export_csv_item(
     }
 }
 
-async fn export_csv_items(
-    pool: &SqlitePool,
-    scope: &CsvExportScope,
-) -> Result<Vec<CsvExportItem>> {
+async fn export_csv_items(pool: &SqlitePool, scope: &CsvExportScope) -> Result<Vec<CsvExportItem>> {
     let mut items = Vec::with_capacity(TABLE_ORDER.len());
     for table in TABLE_ORDER {
         items.push(export_csv_item(pool, table, scope).await?);
@@ -1479,8 +1473,13 @@ impl SqliteDb {
     where
         F: FnMut(CsvImportProgress),
     {
-        import_all_bytes_with_progress(&self.pool, all_csv_bytes_from_bundle(bundle)?, mode, progress)
-            .await
+        import_all_bytes_with_progress(
+            &self.pool,
+            all_csv_bytes_from_bundle(bundle)?,
+            mode,
+            progress,
+        )
+        .await
     }
 
     pub fn worldflow_schema_version(&self) -> u32 {
@@ -1627,7 +1626,9 @@ mod tests {
         let bundle = bundle_from_items(source.export_all_csvs().await?);
 
         let (_target_temp, target) = new_test_db("merge_target").await?;
-        let first = target.import_csvs(bundle.clone(), CsvImportMode::Merge).await?;
+        let first = target
+            .import_csvs(bundle.clone(), CsvImportMode::Merge)
+            .await?;
         assert_eq!(first.projects, 1);
         assert_eq!(first.entries, 1);
 
