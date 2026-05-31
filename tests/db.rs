@@ -360,6 +360,243 @@ async fn test_category_tree() {
 }
 
 #[tokio::test]
+async fn test_cascade_delete_category_removes_subtree_entries_and_links() {
+    let db = setup().await;
+
+    let project = db
+        .create_project(CreateProject {
+            cover_image: None,
+            name: "分类级联删除测试".to_string(),
+            description: None,
+        })
+        .await
+        .unwrap();
+
+    let root = db
+        .create_category(CreateCategory {
+            project_id: project.id,
+            parent_id: None,
+            name: "待删根分类".to_string(),
+            sort_order: None,
+        })
+        .await
+        .unwrap();
+    let child = db
+        .create_category(CreateCategory {
+            project_id: project.id,
+            parent_id: Some(root.id),
+            name: "待删子分类".to_string(),
+            sort_order: None,
+        })
+        .await
+        .unwrap();
+    let grandchild = db
+        .create_category(CreateCategory {
+            project_id: project.id,
+            parent_id: Some(child.id),
+            name: "待删孙分类".to_string(),
+            sort_order: None,
+        })
+        .await
+        .unwrap();
+    let sibling = db
+        .create_category(CreateCategory {
+            project_id: project.id,
+            parent_id: None,
+            name: "保留分类".to_string(),
+            sort_order: None,
+        })
+        .await
+        .unwrap();
+
+    let root_entry = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: Some(root.id),
+            title: "根分类词条".to_string(),
+            summary: None,
+            content: None,
+            r#type: None,
+            tags: None,
+            images: None,
+            cover_path: None,
+        })
+        .await
+        .unwrap();
+    let child_entry = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: Some(child.id),
+            title: "子分类词条".to_string(),
+            summary: None,
+            content: None,
+            r#type: None,
+            tags: None,
+            images: None,
+            cover_path: None,
+        })
+        .await
+        .unwrap();
+    let grandchild_entry = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: Some(grandchild.id),
+            title: "孙分类词条".to_string(),
+            summary: None,
+            content: None,
+            r#type: None,
+            tags: None,
+            images: None,
+            cover_path: None,
+        })
+        .await
+        .unwrap();
+    let sibling_entry = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: Some(sibling.id),
+            title: "保留词条".to_string(),
+            summary: None,
+            content: None,
+            r#type: None,
+            tags: None,
+            images: None,
+            cover_path: None,
+        })
+        .await
+        .unwrap();
+    db.create_link(CreateEntryLink {
+        project_id: project.id,
+        a_id: sibling_entry.id,
+        b_id: child_entry.id,
+    })
+    .await
+    .unwrap();
+
+    let result = db.cascade_delete_category(&root.id).await.unwrap();
+    assert_eq!(result.deleted_categories, 3);
+    assert_eq!(result.deleted_entries, 3);
+
+    assert!(db.get_category(&root.id).await.is_err());
+    assert!(db.get_category(&child.id).await.is_err());
+    assert!(db.get_category(&grandchild.id).await.is_err());
+    assert!(db.get_category(&sibling.id).await.is_ok());
+    assert!(db.get_entry(&root_entry.id).await.is_err());
+    assert!(db.get_entry(&child_entry.id).await.is_err());
+    assert!(db.get_entry(&grandchild_entry.id).await.is_err());
+    assert!(db.get_entry(&sibling_entry.id).await.is_ok());
+    assert!(
+        db.list_outgoing_links(&sibling_entry.id)
+            .await
+            .unwrap()
+            .is_empty(),
+        "删除目标词条后关联内链应由外键级联清理"
+    );
+}
+
+#[tokio::test]
+async fn test_delete_category_move_to_parent_lifts_direct_children_and_entries() {
+    let db = setup().await;
+
+    let project = db
+        .create_project(CreateProject {
+            cover_image: None,
+            name: "分类上移删除测试".to_string(),
+            description: None,
+        })
+        .await
+        .unwrap();
+
+    let parent = db
+        .create_category(CreateCategory {
+            project_id: project.id,
+            parent_id: None,
+            name: "父分类".to_string(),
+            sort_order: None,
+        })
+        .await
+        .unwrap();
+    let target = db
+        .create_category(CreateCategory {
+            project_id: project.id,
+            parent_id: Some(parent.id),
+            name: "待删除分类".to_string(),
+            sort_order: None,
+        })
+        .await
+        .unwrap();
+    let child = db
+        .create_category(CreateCategory {
+            project_id: project.id,
+            parent_id: Some(target.id),
+            name: "直系子分类".to_string(),
+            sort_order: None,
+        })
+        .await
+        .unwrap();
+    let nested = db
+        .create_category(CreateCategory {
+            project_id: project.id,
+            parent_id: Some(child.id),
+            name: "孙分类".to_string(),
+            sort_order: None,
+        })
+        .await
+        .unwrap();
+
+    let target_entry = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: Some(target.id),
+            title: "待上移词条".to_string(),
+            summary: None,
+            content: None,
+            r#type: None,
+            tags: None,
+            images: None,
+            cover_path: None,
+        })
+        .await
+        .unwrap();
+    let nested_entry = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: Some(nested.id),
+            title: "孙分类保留词条".to_string(),
+            summary: None,
+            content: None,
+            r#type: None,
+            tags: None,
+            images: None,
+            cover_path: None,
+        })
+        .await
+        .unwrap();
+
+    let result = db.delete_category_move_to_parent(&target.id).await.unwrap();
+    assert_eq!(result.moved_categories, 1);
+    assert_eq!(result.moved_entries, 1);
+
+    assert!(db.get_category(&target.id).await.is_err());
+    assert_eq!(
+        db.get_category(&child.id).await.unwrap().parent_id,
+        Some(parent.id)
+    );
+    assert_eq!(
+        db.get_category(&nested.id).await.unwrap().parent_id,
+        Some(child.id)
+    );
+    assert_eq!(
+        db.get_entry(&target_entry.id).await.unwrap().category_id,
+        Some(parent.id)
+    );
+    assert_eq!(
+        db.get_entry(&nested_entry.id).await.unwrap().category_id,
+        Some(nested.id)
+    );
+}
+
+#[tokio::test]
 async fn test_entry_with_tags() {
     let db = setup().await;
 

@@ -18,6 +18,11 @@ pub trait CategoryOps: Send + Sync {
     async fn list_categories(&self, project_id: &Uuid) -> Result<Vec<Category>>;
     async fn update_category(&self, id: &Uuid, input: UpdateCategory) -> Result<Category>;
     async fn delete_category(&self, id: &Uuid) -> Result<()>;
+    async fn cascade_delete_category(&self, id: &Uuid) -> Result<CascadeDeleteCategoryResult>;
+    async fn delete_category_move_to_parent(
+        &self,
+        id: &Uuid,
+    ) -> Result<DeleteCategoryMoveToParentResult>;
 }
 
 pub trait EntryOps: Send + Sync {

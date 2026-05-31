@@ -41,3 +41,15 @@ pub struct UpdateCategory {
     pub name: Option<String>,
     pub sort_order: Option<i64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CascadeDeleteCategoryResult {
+    pub deleted_entries: usize,
+    pub deleted_categories: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteCategoryMoveToParentResult {
+    pub moved_categories: usize,
+    pub moved_entries: usize,
+}
