@@ -1,5 +1,5 @@
 use sqlx::Row;
-use std::{env, path::PathBuf};
+use std::{collections::BTreeMap, env, path::PathBuf};
 use uuid::Uuid;
 use worldflow_core::models::EntryFilter;
 use worldflow_core::{
@@ -20,6 +20,33 @@ fn quote_ident(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
 }
 
+#[derive(Debug)]
+struct ColumnInfo {
+    type_name: String,
+    notnull: bool,
+    default_value: Option<String>,
+    pk: i64,
+}
+
+#[derive(Debug)]
+struct ColumnContract {
+    name: &'static str,
+    type_name: &'static str,
+    notnull: Option<bool>,
+    default_value: Option<&'static str>,
+    pk: Option<i64>,
+}
+
+#[derive(Debug)]
+struct ForeignKeyInfo {
+    id: i64,
+    seq: i64,
+    ref_table: String,
+    from: String,
+    to: String,
+    on_delete: String,
+}
+
 async fn table_columns(db: &SqliteDb, table: &str) -> Vec<String> {
     let sql = format!("PRAGMA table_info({})", quote_ident(table));
     sqlx::query(&sql)
@@ -28,6 +55,26 @@ async fn table_columns(db: &SqliteDb, table: &str) -> Vec<String> {
         .unwrap()
         .into_iter()
         .map(|row| row.try_get::<String, _>("name").unwrap())
+        .collect()
+}
+
+async fn table_column_info(db: &SqliteDb, table: &str) -> BTreeMap<String, ColumnInfo> {
+    let sql = format!("PRAGMA table_info({})", quote_ident(table));
+    sqlx::query(&sql)
+        .fetch_all(&db.pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| {
+            let name = row.try_get::<String, _>("name").unwrap();
+            let info = ColumnInfo {
+                type_name: row.try_get("type").unwrap(),
+                notnull: row.try_get::<i64, _>("notnull").unwrap() != 0,
+                default_value: row.try_get("dflt_value").unwrap(),
+                pk: row.try_get("pk").unwrap(),
+            };
+            (name, info)
+        })
         .collect()
 }
 
@@ -41,6 +88,42 @@ async fn assert_table_columns(db: &SqliteDb, table: &str, expected: &[&str]) {
     }
 }
 
+async fn assert_table_column_contracts(db: &SqliteDb, table: &str, expected: &[ColumnContract]) {
+    let columns = table_column_info(db, table).await;
+    for contract in expected {
+        let column = columns
+            .get(contract.name)
+            .unwrap_or_else(|| panic!("{table} 缺少列 {}，当前列: {columns:?}", contract.name));
+
+        assert_eq!(
+            column.type_name, contract.type_name,
+            "{table}.{} 类型不匹配",
+            contract.name
+        );
+
+        if let Some(notnull) = contract.notnull {
+            assert_eq!(
+                column.notnull, notnull,
+                "{table}.{} NOT NULL 契约不匹配",
+                contract.name
+            );
+        }
+
+        if let Some(default_value) = contract.default_value {
+            assert_eq!(
+                column.default_value.as_deref(),
+                Some(default_value),
+                "{table}.{} 默认值不匹配",
+                contract.name
+            );
+        }
+
+        if let Some(pk) = contract.pk {
+            assert_eq!(column.pk, pk, "{table}.{} 主键位置不匹配", contract.name);
+        }
+    }
+}
+
 async fn assert_schema_object_exists(db: &SqliteDb, kind: &str, name: &str) {
     let count: i64 =
         sqlx::query_scalar("SELECT COUNT(1) FROM sqlite_master WHERE type = ? AND name = ?")
@@ -51,6 +134,98 @@ async fn assert_schema_object_exists(db: &SqliteDb, kind: &str, name: &str) {
             .unwrap();
 
     assert_eq!(count, 1, "缺少 {kind} {name}");
+}
+
+async fn schema_object_sql(db: &SqliteDb, kind: &str, name: &str) -> String {
+    sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE type = ? AND name = ?")
+        .bind(kind)
+        .bind(name)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap()
+}
+
+async fn assert_schema_sql_contains(db: &SqliteDb, kind: &str, name: &str, expected: &[&str]) {
+    let sql = schema_object_sql(db, kind, name).await;
+    let normalized = sql
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+
+    for needle in expected {
+        assert!(
+            normalized.contains(&needle.to_lowercase()),
+            "{kind} {name} SQL 未包含 {needle:?}: {sql}"
+        );
+    }
+}
+
+async fn foreign_keys(db: &SqliteDb, table: &str) -> Vec<ForeignKeyInfo> {
+    let sql = format!("PRAGMA foreign_key_list({})", quote_ident(table));
+    sqlx::query(&sql)
+        .fetch_all(&db.pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| ForeignKeyInfo {
+            id: row.try_get("id").unwrap(),
+            seq: row.try_get("seq").unwrap(),
+            ref_table: row.try_get("table").unwrap(),
+            from: row.try_get("from").unwrap(),
+            to: row.try_get("to").unwrap(),
+            on_delete: row.try_get("on_delete").unwrap(),
+        })
+        .collect()
+}
+
+async fn assert_foreign_key(
+    db: &SqliteDb,
+    table: &str,
+    from: &str,
+    ref_table: &str,
+    to: &str,
+    on_delete: &str,
+) {
+    let keys = foreign_keys(db, table).await;
+    assert!(
+        keys.iter().any(|key| key.from == from
+            && key.ref_table == ref_table
+            && key.to == to
+            && key.on_delete.eq_ignore_ascii_case(on_delete)),
+        "{table} 缺少 FK {from} -> {ref_table}({to}) ON DELETE {on_delete}，当前: {keys:?}"
+    );
+}
+
+async fn assert_composite_foreign_key(
+    db: &SqliteDb,
+    table: &str,
+    ref_table: &str,
+    columns: &[(&str, &str)],
+    on_delete: &str,
+) {
+    let keys = foreign_keys(db, table).await;
+    let mut groups: BTreeMap<i64, Vec<&ForeignKeyInfo>> = BTreeMap::new();
+    for key in &keys {
+        groups.entry(key.id).or_default().push(key);
+    }
+
+    let matched = groups.values().any(|group| {
+        columns.iter().enumerate().all(|(seq, (from, to))| {
+            group.iter().any(|key| {
+                key.seq == seq as i64
+                    && key.ref_table == ref_table
+                    && key.from == *from
+                    && key.to == *to
+                    && key.on_delete.eq_ignore_ascii_case(on_delete)
+            })
+        })
+    });
+
+    assert!(
+        matched,
+        "{table} 缺少复合 FK -> {ref_table} {columns:?} ON DELETE {on_delete}，当前: {keys:?}"
+    );
 }
 
 async fn assert_representative_query(db: &SqliteDb, sql: &str) {
@@ -203,6 +378,406 @@ async fn test_sqlite_schema_smoke_matches_hot_queries() {
     )
     .await;
 
+    assert_table_column_contracts(
+        &db,
+        "projects",
+        &[
+            ColumnContract {
+                name: "id",
+                type_name: "BLOB",
+                notnull: None,
+                default_value: None,
+                pk: Some(1),
+            },
+            ColumnContract {
+                name: "name",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "created_at",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "updated_at",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+        ],
+    )
+    .await;
+    assert_table_column_contracts(
+        &db,
+        "categories",
+        &[
+            ColumnContract {
+                name: "id",
+                type_name: "BLOB",
+                notnull: None,
+                default_value: None,
+                pk: Some(1),
+            },
+            ColumnContract {
+                name: "project_id",
+                type_name: "BLOB",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "parent_id",
+                type_name: "BLOB",
+                notnull: Some(false),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "name",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "sort_order",
+                type_name: "INTEGER",
+                notnull: Some(true),
+                default_value: Some("0"),
+                pk: None,
+            },
+        ],
+    )
+    .await;
+    assert_table_column_contracts(
+        &db,
+        "tag_schemas",
+        &[
+            ColumnContract {
+                name: "id",
+                type_name: "BLOB",
+                notnull: None,
+                default_value: None,
+                pk: Some(1),
+            },
+            ColumnContract {
+                name: "project_id",
+                type_name: "BLOB",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "name",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "type",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "target",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: Some("'[]'"),
+                pk: None,
+            },
+            ColumnContract {
+                name: "sort_order",
+                type_name: "INTEGER",
+                notnull: Some(true),
+                default_value: Some("0"),
+                pk: None,
+            },
+        ],
+    )
+    .await;
+    assert_table_column_contracts(
+        &db,
+        "entries",
+        &[
+            ColumnContract {
+                name: "_rowid",
+                type_name: "INTEGER",
+                notnull: None,
+                default_value: None,
+                pk: Some(1),
+            },
+            ColumnContract {
+                name: "id",
+                type_name: "BLOB",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "project_id",
+                type_name: "BLOB",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "category_id",
+                type_name: "BLOB",
+                notnull: Some(false),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "title",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "content",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: Some("''"),
+                pk: None,
+            },
+            ColumnContract {
+                name: "tags",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: Some("'[]'"),
+                pk: None,
+            },
+            ColumnContract {
+                name: "images",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: Some("'[]'"),
+                pk: None,
+            },
+        ],
+    )
+    .await;
+    assert_table_column_contracts(
+        &db,
+        "entry_relations",
+        &[
+            ColumnContract {
+                name: "id",
+                type_name: "BLOB",
+                notnull: None,
+                default_value: None,
+                pk: Some(1),
+            },
+            ColumnContract {
+                name: "project_id",
+                type_name: "BLOB",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "a_id",
+                type_name: "BLOB",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "b_id",
+                type_name: "BLOB",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "relation",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "content",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+        ],
+    )
+    .await;
+    assert_table_column_contracts(
+        &db,
+        "entry_types",
+        &[
+            ColumnContract {
+                name: "id",
+                type_name: "BLOB",
+                notnull: None,
+                default_value: None,
+                pk: Some(1),
+            },
+            ColumnContract {
+                name: "project_id",
+                type_name: "BLOB",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "name",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+        ],
+    )
+    .await;
+    assert_table_column_contracts(
+        &db,
+        "entry_links",
+        &[
+            ColumnContract {
+                name: "id",
+                type_name: "BLOB",
+                notnull: None,
+                default_value: None,
+                pk: Some(1),
+            },
+            ColumnContract {
+                name: "project_id",
+                type_name: "BLOB",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "a_id",
+                type_name: "BLOB",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "b_id",
+                type_name: "BLOB",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+        ],
+    )
+    .await;
+    assert_table_column_contracts(
+        &db,
+        "idea_notes",
+        &[
+            ColumnContract {
+                name: "id",
+                type_name: "BLOB",
+                notnull: None,
+                default_value: None,
+                pk: Some(1),
+            },
+            ColumnContract {
+                name: "project_id",
+                type_name: "BLOB",
+                notnull: Some(false),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "content",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "status",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: Some("'inbox'"),
+                pk: None,
+            },
+            ColumnContract {
+                name: "pinned",
+                type_name: "INTEGER",
+                notnull: Some(true),
+                default_value: Some("0"),
+                pk: None,
+            },
+            ColumnContract {
+                name: "converted_entry_id",
+                type_name: "BLOB",
+                notnull: Some(false),
+                default_value: None,
+                pk: None,
+            },
+        ],
+    )
+    .await;
+    assert_table_column_contracts(
+        &db,
+        "api_usage_log",
+        &[
+            ColumnContract {
+                name: "id",
+                type_name: "TEXT",
+                notnull: None,
+                default_value: None,
+                pk: Some(1),
+            },
+            ColumnContract {
+                name: "session_id",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "modality",
+                type_name: "TEXT",
+                notnull: Some(true),
+                default_value: None,
+                pk: None,
+            },
+            ColumnContract {
+                name: "prompt_tokens",
+                type_name: "INTEGER",
+                notnull: Some(true),
+                default_value: Some("0"),
+                pk: None,
+            },
+            ColumnContract {
+                name: "completion_tokens",
+                type_name: "INTEGER",
+                notnull: Some(true),
+                default_value: Some("0"),
+                pk: None,
+            },
+            ColumnContract {
+                name: "total_tokens",
+                type_name: "INTEGER",
+                notnull: Some(true),
+                default_value: Some("0"),
+                pk: None,
+            },
+        ],
+    )
+    .await;
+
     for index in [
         "idx_entries_project",
         "idx_entries_category",
@@ -235,6 +810,115 @@ async fn test_sqlite_schema_smoke_matches_hot_queries() {
     ] {
         assert_schema_object_exists(&db, "index", index).await;
     }
+
+    for trigger in [
+        "entries_category_same_project_insert",
+        "entries_category_same_project_update_cat",
+        "entries_category_same_project_update_proj",
+        "relations_same_project_insert",
+        "relations_two_way_order_insert",
+        "relations_two_way_order_update",
+        "projects_updated_at",
+        "categories_updated_at",
+        "tag_schemas_updated_at",
+        "entries_updated_at",
+        "entry_relations_updated_at",
+        "entry_types_updated_at",
+        "entry_links_same_project_insert",
+        "entry_links_same_project_update",
+        "idea_notes_updated_at",
+        "entries_fts_insert",
+        "entries_fts_update",
+        "entries_fts_delete",
+    ] {
+        assert_schema_object_exists(&db, "trigger", trigger).await;
+    }
+
+    assert_schema_sql_contains(
+        &db,
+        "table",
+        "entries_fts",
+        &["summary", "project_id UNINDEXED", "tokenize='trigram'"],
+    )
+    .await;
+
+    assert_foreign_key(&db, "categories", "project_id", "projects", "id", "CASCADE").await;
+    assert_composite_foreign_key(
+        &db,
+        "categories",
+        "categories",
+        &[("project_id", "project_id"), ("parent_id", "id")],
+        "CASCADE",
+    )
+    .await;
+    assert_foreign_key(
+        &db,
+        "tag_schemas",
+        "project_id",
+        "projects",
+        "id",
+        "CASCADE",
+    )
+    .await;
+    assert_foreign_key(&db, "entries", "project_id", "projects", "id", "CASCADE").await;
+    assert_foreign_key(
+        &db,
+        "entries",
+        "category_id",
+        "categories",
+        "id",
+        "SET NULL",
+    )
+    .await;
+    assert_foreign_key(
+        &db,
+        "entry_relations",
+        "project_id",
+        "projects",
+        "id",
+        "CASCADE",
+    )
+    .await;
+    assert_foreign_key(&db, "entry_relations", "a_id", "entries", "id", "CASCADE").await;
+    assert_foreign_key(&db, "entry_relations", "b_id", "entries", "id", "CASCADE").await;
+    assert_foreign_key(
+        &db,
+        "entry_types",
+        "project_id",
+        "projects",
+        "id",
+        "CASCADE",
+    )
+    .await;
+    assert_foreign_key(
+        &db,
+        "entry_links",
+        "project_id",
+        "projects",
+        "id",
+        "CASCADE",
+    )
+    .await;
+    assert_foreign_key(&db, "entry_links", "a_id", "entries", "id", "CASCADE").await;
+    assert_foreign_key(&db, "entry_links", "b_id", "entries", "id", "CASCADE").await;
+    assert_foreign_key(
+        &db,
+        "idea_notes",
+        "project_id",
+        "projects",
+        "id",
+        "SET NULL",
+    )
+    .await;
+    assert_foreign_key(
+        &db,
+        "idea_notes",
+        "converted_entry_id",
+        "entries",
+        "id",
+        "SET NULL",
+    )
+    .await;
 
     for sql in [
         "SELECT id, name, description, cover_image, created_at, updated_at FROM projects ORDER BY updated_at DESC LIMIT 1",
