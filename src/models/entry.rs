@@ -3,6 +3,8 @@ use sqlx::types::Json;
 use std::path::PathBuf;
 use uuid::Uuid;
 
+use super::{EntryLink, EntryRelation, RelationDirection};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FCImage {
     pub path: PathBuf,
@@ -77,4 +79,43 @@ pub struct UpdateEntry {
     /// None = 不主动设置；Some(None) = 清空；Some(Some(s)) = 更新为指定展示图路径。
     /// 当该字段为 None 且 images 为 Some 时，兼容旧逻辑，从 images 中的 is_cover 图片推导。
     pub cover_path: Option<Option<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveEntryRelationPatch {
+    pub id: Option<Uuid>,
+    pub a_id: Uuid,
+    pub b_id: Uuid,
+    pub relation: RelationDirection,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveEntryLinkTarget {
+    pub entry_id: Option<Uuid>,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveEntryBundle {
+    pub project_id: Uuid,
+    pub entry_id: Uuid,
+    pub category_id: Option<Uuid>,
+    pub title: String,
+    pub summary: Option<String>,
+    pub content: String,
+    pub r#type: Option<String>,
+    pub tags: Option<Vec<EntryTag>>,
+    pub images: Option<Vec<FCImage>>,
+    pub cover_path: Option<Option<String>>,
+    pub outgoing_link_targets: Vec<SaveEntryLinkTarget>,
+    pub relation_patches: Vec<SaveEntryRelationPatch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveEntryBundleResult {
+    pub entry: Entry,
+    pub outgoing_links: Vec<EntryLink>,
+    pub incoming_links: Vec<EntryLink>,
+    pub relations: Vec<EntryRelation>,
 }

@@ -7,7 +7,7 @@ use crate::{
 use sqlx::Row;
 use uuid::Uuid;
 
-fn row_to_relation(row: &sqlx::sqlite::SqliteRow) -> Result<EntryRelation> {
+pub(super) fn row_to_relation(row: &sqlx::sqlite::SqliteRow) -> Result<EntryRelation> {
     let relation_str: String = row.try_get("relation")?;
     let relation = RelationDirection::from_str(&relation_str)
         .ok_or_else(|| WorldflowError::InvalidInput(format!("未知的关系类型: {relation_str}")))?;

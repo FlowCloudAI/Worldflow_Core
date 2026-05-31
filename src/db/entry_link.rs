@@ -7,7 +7,7 @@ use crate::{
 use sqlx::Row;
 use uuid::Uuid;
 
-fn row_to_link(row: &sqlx::sqlite::SqliteRow) -> Result<EntryLink> {
+pub(super) fn row_to_link(row: &sqlx::sqlite::SqliteRow) -> Result<EntryLink> {
     Ok(EntryLink {
         id: row.try_get("id")?,
         project_id: row.try_get("project_id")?,
@@ -16,7 +16,7 @@ fn row_to_link(row: &sqlx::sqlite::SqliteRow) -> Result<EntryLink> {
     })
 }
 
-fn normalize_linked_entry_ids(entry_id: &Uuid, linked_entry_ids: &[Uuid]) -> Vec<Uuid> {
+pub(super) fn normalize_linked_entry_ids(entry_id: &Uuid, linked_entry_ids: &[Uuid]) -> Vec<Uuid> {
     let mut unique_ids = Vec::new();
     for linked_id in linked_entry_ids {
         if linked_id == entry_id {

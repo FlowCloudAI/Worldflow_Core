@@ -41,6 +41,7 @@ pub trait EntryOps: Send + Sync {
     async fn update_entry(&self, id: &Uuid, input: UpdateEntry) -> Result<Entry>;
     async fn delete_entry(&self, id: &Uuid) -> Result<()>;
     async fn create_entries_bulk(&self, inputs: Vec<CreateEntry>) -> Result<usize>;
+    async fn save_entry_bundle(&self, input: SaveEntryBundle) -> Result<SaveEntryBundleResult>;
 }
 
 pub trait TagSchemaOps: Send + Sync {

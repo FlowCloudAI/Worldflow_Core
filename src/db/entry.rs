@@ -1,14 +1,19 @@
+use super::entry_link::{normalize_linked_entry_ids, row_to_link};
+use super::entry_relation::row_to_relation;
 use super::traits::EntryOps;
 use crate::{
     db::SqliteDb,
     error::{Result, WorldflowError},
     models::{
-        CreateEntry, Entry, EntryBrief, EntryFilter, FCImage, UpdateEntry,
-        validate_builtin_type_key,
+        CreateEntry, Entry, EntryBrief, EntryFilter, FCImage, RelationDirection, SaveEntryBundle,
+        SaveEntryBundleResult, UpdateEntry, validate_builtin_type_key,
     },
 };
-use sqlx::Row;
-use std::{collections::HashSet, path::PathBuf};
+use sqlx::{Row, Sqlite, Transaction};
+use std::{
+    collections::{BTreeSet, HashMap, HashSet},
+    path::PathBuf,
+};
 use uuid::Uuid;
 
 const MAX_ENTRY_TYPE_VALIDATION_PAIRS_PER_QUERY: usize = 400;
@@ -73,6 +78,30 @@ fn custom_entry_type_not_found_error() -> WorldflowError {
     WorldflowError::InvalidInput("自定义词条类型不存在或不属于当前项目".to_string())
 }
 
+fn normalize_entry_compare_text(value: &str) -> String {
+    value
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .trim()
+        .to_string()
+}
+
+fn normalize_entry_lookup_title(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
+fn normalize_relation_endpoints(
+    a_id: Uuid,
+    b_id: Uuid,
+    relation: &RelationDirection,
+) -> (Uuid, Uuid) {
+    if *relation == RelationDirection::TwoWay && a_id > b_id {
+        (b_id, a_id)
+    } else {
+        (a_id, b_id)
+    }
+}
+
 async fn validate_entry_type(db: &SqliteDb, project_id: &Uuid, typ: Option<&str>) -> Result<()> {
     let Some(typ) = typ else {
         return Ok(());
@@ -85,6 +114,30 @@ async fn validate_entry_type(db: &SqliteDb, project_id: &Uuid, typ: Option<&str>
             .bind(type_id)
             .bind(project_id)
             .fetch_one(&db.pool)
+            .await?;
+    let cnt: i64 = row.try_get("cnt")?;
+    if cnt == 0 {
+        return Err(custom_entry_type_not_found_error());
+    }
+    Ok(())
+}
+
+async fn validate_entry_type_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    project_id: &Uuid,
+    typ: Option<&str>,
+) -> Result<()> {
+    let Some(typ) = typ else {
+        return Ok(());
+    };
+    let Ok(type_id) = Uuid::parse_str(typ) else {
+        return validate_builtin_type_key(typ);
+    };
+    let row =
+        sqlx::query("SELECT COUNT(*) as cnt FROM entry_types WHERE id = ? AND project_id = ?")
+            .bind(type_id)
+            .bind(project_id)
+            .fetch_one(&mut **tx)
             .await?;
     let cnt: i64 = row.try_get("cnt")?;
     if cnt == 0 {
@@ -426,5 +479,302 @@ impl EntryOps for SqliteDb {
 
         tx.commit().await?;
         Ok(count)
+    }
+
+    async fn save_entry_bundle(&self, input: SaveEntryBundle) -> Result<SaveEntryBundleResult> {
+        let mut tx = self.pool.begin().await?;
+
+        let existing_row = sqlx::query(
+            "SELECT id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at, updated_at
+             FROM entries WHERE id = ?",
+        )
+        .bind(input.entry_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| WorldflowError::NotFound(format!("entry {}", input.entry_id)))?;
+        let existing_entry = row_to_entry(&existing_row)?;
+        if existing_entry.project_id != input.project_id {
+            return Err(WorldflowError::InvalidInput(
+                "词条不属于当前项目".to_string(),
+            ));
+        }
+
+        validate_entry_type_in_tx(&mut tx, &input.project_id, input.r#type.as_deref()).await?;
+
+        let same_category_rows = if let Some(category_id) = input.category_id {
+            sqlx::query(
+                "SELECT id, title
+                 FROM entries
+                 WHERE project_id = ? AND category_id = ?",
+            )
+            .bind(input.project_id)
+            .bind(category_id)
+            .fetch_all(&mut *tx)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT id, title
+                 FROM entries
+                 WHERE project_id = ? AND category_id IS NULL",
+            )
+            .bind(input.project_id)
+            .fetch_all(&mut *tx)
+            .await?
+        };
+        let normalized_title = normalize_entry_compare_text(&input.title);
+        let has_duplicate_title = same_category_rows.iter().any(|row| {
+            let id = row.try_get::<Uuid, _>("id");
+            let title = row.try_get::<String, _>("title");
+            matches!(
+                (id, title),
+                (Ok(id), Ok(title))
+                    if id != input.entry_id
+                        && normalize_entry_compare_text(&title) == normalized_title
+            )
+        });
+        if has_duplicate_title {
+            return Err(WorldflowError::InvalidInput(
+                "当前分类下已存在同名词条，请更换标题。".to_string(),
+            ));
+        }
+
+        let tags_json = input
+            .tags
+            .map(|tags| serde_json::to_string(&tags))
+            .transpose()?;
+        let images_json = input
+            .images
+            .map(|images| serde_json::to_string(&images))
+            .transpose()?;
+        let cover_path_is_some = input.cover_path.is_some();
+        let cover_path = input.cover_path.flatten();
+        let entry_row = sqlx::query(
+            "UPDATE entries
+             SET title       = ?,
+                 summary     = ?,
+                 content     = ?,
+                 category_id = ?,
+                 type        = ?,
+                 tags        = COALESCE(?, tags),
+                 images      = COALESCE(?, images),
+                 cover_path  = CASE WHEN ? THEN ? ELSE cover_path END
+             WHERE id = ?
+             RETURNING id, project_id, category_id, title, summary, content, type, tags, images, cover_path, created_at, updated_at",
+        )
+        .bind(&normalized_title)
+        .bind(input.summary)
+        .bind(input.content)
+        .bind(input.category_id)
+        .bind(input.r#type)
+        .bind(tags_json)
+        .bind(images_json)
+        .bind(cover_path_is_some)
+        .bind(cover_path)
+        .bind(input.entry_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| super::map_row_not_found(e, format!("entry {}", input.entry_id)))?;
+        let entry = row_to_entry(&entry_row)?;
+
+        let title_rows = sqlx::query(
+            "SELECT id, title
+             FROM entries
+             WHERE project_id = ?
+             ORDER BY updated_at DESC",
+        )
+        .bind(input.project_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut title_to_entry_id = HashMap::<String, Uuid>::new();
+        for row in title_rows {
+            title_to_entry_id.insert(
+                normalize_entry_lookup_title(&row.try_get::<String, _>("title")?),
+                row.try_get("id")?,
+            );
+        }
+
+        let mut target_ids = Vec::<Uuid>::new();
+        for target in &input.outgoing_link_targets {
+            if let Some(id) = target.entry_id {
+                target_ids.push(id);
+                continue;
+            }
+            if let Some(id) = title_to_entry_id.get(&normalize_entry_lookup_title(&target.title)) {
+                target_ids.push(*id);
+            }
+        }
+        let normalized_target_ids = normalize_linked_entry_ids(&input.entry_id, &target_ids);
+
+        sqlx::query("DELETE FROM entry_links WHERE a_id = ?")
+            .bind(input.entry_id)
+            .execute(&mut *tx)
+            .await?;
+
+        let mut outgoing_links = Vec::with_capacity(normalized_target_ids.len());
+        for target_id in normalized_target_ids {
+            let row = sqlx::query(
+                "INSERT INTO entry_links (id, project_id, a_id, b_id)
+                 VALUES (?, ?, ?, ?)
+                 RETURNING id, project_id, a_id, b_id",
+            )
+            .bind(Uuid::now_v7())
+            .bind(input.project_id)
+            .bind(input.entry_id)
+            .bind(target_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            outgoing_links.push(row_to_link(&row)?);
+        }
+
+        let existing_relation_rows = sqlx::query(
+            "SELECT id, project_id, a_id, b_id, relation, content, created_at, updated_at
+             FROM entry_relations
+             WHERE a_id = ?
+                OR (b_id = ? AND relation = 'two_way')
+             ORDER BY created_at ",
+        )
+        .bind(input.entry_id)
+        .bind(input.entry_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let existing_relations = existing_relation_rows
+            .iter()
+            .map(row_to_relation)
+            .collect::<Result<Vec<_>>>()?;
+        let current_relation_map = existing_relations
+            .iter()
+            .map(|relation| (relation.id, relation.clone()))
+            .collect::<HashMap<_, _>>();
+        let next_relation_ids = input
+            .relation_patches
+            .iter()
+            .filter_map(|patch| patch.id)
+            .collect::<BTreeSet<_>>();
+
+        for patch in &input.relation_patches {
+            let content = normalize_entry_compare_text(&patch.content);
+            let existing = patch
+                .id
+                .and_then(|id| current_relation_map.get(&id).cloned());
+
+            let Some(existing) = existing else {
+                let (a_id, b_id) =
+                    normalize_relation_endpoints(patch.a_id, patch.b_id, &patch.relation);
+                sqlx::query(
+                    "INSERT INTO entry_relations (id, project_id, a_id, b_id, relation, content)
+                     VALUES (?, ?, ?, ?, ?, ?)",
+                )
+                .bind(Uuid::now_v7())
+                .bind(input.project_id)
+                .bind(a_id)
+                .bind(b_id)
+                .bind(patch.relation.as_str())
+                .bind(content)
+                .execute(&mut *tx)
+                .await?;
+                continue;
+            };
+
+            if existing.a_id != patch.a_id || existing.b_id != patch.b_id {
+                sqlx::query("DELETE FROM entry_relations WHERE id = ?")
+                    .bind(existing.id)
+                    .execute(&mut *tx)
+                    .await?;
+                let (a_id, b_id) =
+                    normalize_relation_endpoints(patch.a_id, patch.b_id, &patch.relation);
+                sqlx::query(
+                    "INSERT INTO entry_relations (id, project_id, a_id, b_id, relation, content)
+                     VALUES (?, ?, ?, ?, ?, ?)",
+                )
+                .bind(Uuid::now_v7())
+                .bind(input.project_id)
+                .bind(a_id)
+                .bind(b_id)
+                .bind(patch.relation.as_str())
+                .bind(content)
+                .execute(&mut *tx)
+                .await?;
+                continue;
+            }
+
+            if existing.relation != patch.relation
+                || normalize_entry_compare_text(&existing.content) != content
+            {
+                let needs_swap =
+                    patch.relation == RelationDirection::TwoWay && existing.a_id > existing.b_id;
+                let sql = if needs_swap {
+                    "UPDATE entry_relations
+                     SET relation = ?,
+                         content  = ?,
+                         a_id = b_id, b_id = a_id
+                     WHERE id = ?"
+                } else {
+                    "UPDATE entry_relations
+                     SET relation = ?,
+                         content  = ?
+                     WHERE id = ?"
+                };
+                sqlx::query(sql)
+                    .bind(patch.relation.as_str())
+                    .bind(content)
+                    .bind(existing.id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+
+        for existing in &existing_relations {
+            if next_relation_ids.contains(&existing.id) {
+                continue;
+            }
+            sqlx::query("DELETE FROM entry_relations WHERE id = ?")
+                .bind(existing.id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        sqlx::query("UPDATE projects SET name = name WHERE id = ?")
+            .bind(input.project_id)
+            .execute(&mut *tx)
+            .await?;
+
+        let incoming_link_rows = sqlx::query(
+            "SELECT id, project_id, a_id, b_id
+             FROM entry_links
+             WHERE b_id = ?
+             ORDER BY rowid",
+        )
+        .bind(input.entry_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let incoming_links = incoming_link_rows
+            .iter()
+            .map(row_to_link)
+            .collect::<Result<Vec<_>>>()?;
+
+        let relation_rows = sqlx::query(
+            "SELECT id, project_id, a_id, b_id, relation, content, created_at, updated_at
+             FROM entry_relations
+             WHERE a_id = ?
+                OR (b_id = ? AND relation = 'two_way')
+             ORDER BY created_at ",
+        )
+        .bind(input.entry_id)
+        .bind(input.entry_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let relations = relation_rows
+            .iter()
+            .map(row_to_relation)
+            .collect::<Result<Vec<_>>>()?;
+
+        tx.commit().await?;
+
+        Ok(SaveEntryBundleResult {
+            entry,
+            outgoing_links,
+            incoming_links,
+            relations,
+        })
     }
 }

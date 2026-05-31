@@ -3,8 +3,8 @@ use std::{env, path::PathBuf};
 use uuid::Uuid;
 use worldflow_core::models::EntryFilter;
 use worldflow_core::{
-    CategoryOps, EntryLinkOps, EntryOps, EntryTypeOps, IdeaNoteOps, ProjectOps, SqliteDb,
-    TagSchemaOps, models::*,
+    CategoryOps, EntryLinkOps, EntryOps, EntryRelationOps, EntryTypeOps, IdeaNoteOps, ProjectOps,
+    SqliteDb, TagSchemaOps, models::*,
 };
 
 async fn setup() -> SqliteDb {
@@ -897,6 +897,199 @@ async fn test_entry_links_foreign_key_rejects_missing_target() {
         .await;
 
     assert!(result.is_err(), "不存在的 b_id 应被外键拒绝");
+}
+
+#[tokio::test]
+async fn test_save_entry_bundle_updates_entry_links_and_relations_in_transaction() {
+    let db = setup().await;
+
+    let project = db
+        .create_project(CreateProject {
+            cover_image: None,
+            name: "词条聚合保存测试".to_string(),
+            description: None,
+        })
+        .await
+        .unwrap();
+
+    let source = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: None,
+            title: "源词条".to_string(),
+            summary: None,
+            content: Some("旧正文".to_string()),
+            r#type: None,
+            tags: None,
+            images: None,
+            cover_path: None,
+        })
+        .await
+        .unwrap();
+
+    let target1 = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: None,
+            title: "目标一".to_string(),
+            summary: None,
+            content: Some("内容1".to_string()),
+            r#type: None,
+            tags: None,
+            images: None,
+            cover_path: None,
+        })
+        .await
+        .unwrap();
+
+    let target2 = db
+        .create_entry(CreateEntry {
+            project_id: project.id,
+            category_id: None,
+            title: "目标二".to_string(),
+            summary: None,
+            content: Some("内容2".to_string()),
+            r#type: None,
+            tags: None,
+            images: None,
+            cover_path: None,
+        })
+        .await
+        .unwrap();
+
+    let kept_relation = db
+        .create_relation(CreateEntryRelation {
+            project_id: project.id,
+            a_id: source.id,
+            b_id: target1.id,
+            relation: RelationDirection::OneWay,
+            content: "旧关系".to_string(),
+        })
+        .await
+        .unwrap();
+    let stale_relation = db
+        .create_relation(CreateEntryRelation {
+            project_id: project.id,
+            a_id: source.id,
+            b_id: target2.id,
+            relation: RelationDirection::OneWay,
+            content: "待删除关系".to_string(),
+        })
+        .await
+        .unwrap();
+
+    let result = db
+        .save_entry_bundle(SaveEntryBundle {
+            project_id: project.id,
+            entry_id: source.id,
+            category_id: None,
+            title: "源词条更新".to_string(),
+            summary: Some("新摘要".to_string()),
+            content: "新正文".to_string(),
+            r#type: Some("character".to_string()),
+            tags: None,
+            images: None,
+            cover_path: Some(None),
+            outgoing_link_targets: vec![
+                SaveEntryLinkTarget {
+                    entry_id: None,
+                    title: "目标二".to_string(),
+                },
+                SaveEntryLinkTarget {
+                    entry_id: Some(target1.id),
+                    title: "目标一".to_string(),
+                },
+                SaveEntryLinkTarget {
+                    entry_id: Some(source.id),
+                    title: "自链接应过滤".to_string(),
+                },
+            ],
+            relation_patches: vec![
+                SaveEntryRelationPatch {
+                    id: Some(kept_relation.id),
+                    a_id: source.id,
+                    b_id: target1.id,
+                    relation: RelationDirection::OneWay,
+                    content: "新关系".to_string(),
+                },
+                SaveEntryRelationPatch {
+                    id: None,
+                    a_id: source.id,
+                    b_id: target2.id,
+                    relation: RelationDirection::TwoWay,
+                    content: "双向关系".to_string(),
+                },
+            ],
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(result.entry.title, "源词条更新");
+    assert_eq!(result.entry.summary.as_deref(), Some("新摘要"));
+    assert_eq!(
+        result.outgoing_links.len(),
+        2,
+        "标题链接、id 链接应去重并过滤自链接"
+    );
+    assert!(
+        result
+            .outgoing_links
+            .iter()
+            .any(|link| link.b_id == target1.id)
+    );
+    assert!(
+        result
+            .outgoing_links
+            .iter()
+            .any(|link| link.b_id == target2.id)
+    );
+    assert!(result.incoming_links.is_empty());
+
+    let stored_relations = db.list_relations_for_entry(&source.id).await.unwrap();
+    assert_eq!(stored_relations.len(), 2);
+    assert!(
+        stored_relations
+            .iter()
+            .any(|relation| relation.id == kept_relation.id && relation.content == "新关系")
+    );
+    assert!(
+        stored_relations
+            .iter()
+            .any(|relation| relation.relation == RelationDirection::TwoWay
+                && relation.content == "双向关系")
+    );
+    assert!(
+        !stored_relations
+            .iter()
+            .any(|relation| relation.id == stale_relation.id),
+        "草稿中不存在的旧关系应被删除"
+    );
+
+    let rollback_result = db
+        .save_entry_bundle(SaveEntryBundle {
+            project_id: project.id,
+            entry_id: source.id,
+            category_id: None,
+            title: "不应落库".to_string(),
+            summary: Some("不应落库".to_string()),
+            content: "不应落库".to_string(),
+            r#type: Some("character".to_string()),
+            tags: None,
+            images: None,
+            cover_path: None,
+            outgoing_link_targets: vec![SaveEntryLinkTarget {
+                entry_id: Some(Uuid::now_v7()),
+                title: "不存在目标".to_string(),
+            }],
+            relation_patches: Vec::new(),
+        })
+        .await;
+    assert!(rollback_result.is_err(), "无效链接目标应触发事务回滚");
+
+    let source_after_rollback = db.get_entry(&source.id).await.unwrap();
+    assert_eq!(source_after_rollback.title, "源词条更新");
+    assert_eq!(source_after_rollback.content, "新正文");
+    assert_eq!(db.list_outgoing_links(&source.id).await.unwrap().len(), 2);
 }
 
 // ======================== 词条类型测试 ========================
