@@ -1,7 +1,12 @@
 # 世界观数据核心（core_world_data）
 
-`core_world_data` 是 FlowCloudAI 的世界观数据核心库，统一维护项目实体、关系图、快照与版本化存储。  
-仓库当前面向桌面端 SQLite 数据链路，供上层应用复用数据模型、迁移与快照能力。
+`core_world_data` 是 FlowCloudAI 的数据核心，提供世界观实体、关系图、版本快照与迁移能力，供桌面端和网站服务复用统一语义。  
+它负责在数据库层保证数据一致性，并通过特性开关区分运行时行为。
+
+## 项目简介
+
+仓库覆盖模型定义、关系查询、快照回放与迁移体系，核心目标是维持历史兼容与可回滚性。  
+改动通常会影响 `app_main` 与 `site_flowcloudai` 的世界观视图，需要同步跨仓库验证。
 
 ## 快速开始
 
@@ -11,25 +16,26 @@
 cd core_world_data
 cargo check --lib
 cargo test --lib
+cargo test
+cargo check --lib --no-default-features --features sqlite
+cargo test --no-default-features --features sqlite
 ```
 
 ### 最小示例
 
-1. 运行 `cargo test --lib` 验证数据模型与抽象层。  
-2. 运行 `cargo test` 验证端到端行为。  
-3. 禁用默认特性时运行 `cargo check --lib --no-default-features --features sqlite` 验证最小 SQLite 组合。
+1. 运行 `cargo test --lib`，确认基础模型与查询行为。  
+2. 运行 `cargo test`，确认集成场景回归。  
+3. 对比 `sqlite` 特性与默认特性组合，记录查询差异。  
 
 ## 主要功能 / 使用方式
 
-- 数据建模、持久化与实体版本控制。  
-- 快照与回放接口。  
-- SQLite 数据访问与迁移。  
-- 关系图与查询工具链。  
+- 世界观项目、实体与关系模型定义。  
+- 快照生成、版本回放和迁移管理。  
+- SQL 查询策略与数据库特性兼容控制。  
 
 ## 技术栈
 
-- Rust 2024、`sqlx`、迁移脚本、特性化编译。  
-- `csv` 与 UUID、JSON 工具支持元数据导入导出。  
+- Rust 2024、sqlx、git2、UUID、JSON  
 
 ## 目录结构（仅顶层）
 
@@ -43,5 +49,8 @@ core_world_data/
 
 ## 许可证与贡献方式
 
-许可证以子仓库声明为准。  
-提交前补充 SQLite 验证命令输出和兼容性说明。
+- 许可证：`core_world_data/LICENSE`。  
+- 贡献前建议补充 `cargo test --lib`、`cargo test` 与迁移回滚步骤。  
+- PR 说明应写明 SQLite 与非 SQLite 模式下的行为差异。  
+
+文档同步时间：2026-06-03 21:04:46 +08:00

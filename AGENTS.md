@@ -2,8 +2,8 @@
 
 ## 项目概览
 
-`core_world_data` 是世界观数据核心库，提供项目实体、关系图谱、快照和 SQLite 数据访问能力。  
-上层应用通过该库复用数据模型、迁移与快照能力。
+`core_world_data` 是 FlowCloudAI 的世界观数据核心库，集中管理项目实体、关系、快照和迁移规则。  
+上层应用与服务端通过该库共享模型与查询语义，版本兼容性主要取决于迁移和特性组合。
 
 ## 构建 / 运行 / 测试 / lint
 
@@ -13,42 +13,45 @@ cargo check --lib
 cargo test --lib
 cargo test
 cargo check --lib --no-default-features --features sqlite
+cargo test --no-default-features --features sqlite
 ```
 
 ## 代码风格与命名约定
 
-- Rust 2024，公开接口使用清晰 trait 边界与错误传播。  
-- 新建查询/迁移时保持 SQLite schema、模型和测试同步。  
-- SQL 与 schema 变更需注明兼容范围与回退策略。
+- Rust 2024，类型 `PascalCase`，函数/变量 `snake_case`，常量 `SCREAMING_SNAKE_CASE`。  
+- SQL 模型变更保持字段语义稳定，迁移文件与模型结构需可追溯。  
+- 错误返回保留上下文信息，便于跨层排障。  
 
-## 目录结构与职责
+## 目录结构与模块职责
 
 ```text
 core_world_data/
-├── src/            # 模型、仓储、查询与服务接口
-├── migrations/     # SQLite 迁移
-├── tests/          # 回归与压力测试
-└── .sqlx/          # sqlx 缓存
+├── src/
+│   ├── db/         # 存储与查询服务
+│   └── models/     # 数据模型与实体定义
+├── migrations/     # SQLite/版本迁移
+├── tests/          # 回归测试
+└── .sqlx/          # 查询缓存与元数据
 ```
 
 ## 安全 / 禁止事项
 
-- 不提交数据库连接串、Token、生产环境凭据。  
-- 测试数据可提交，敏感数据脱敏后再纳入仓库。  
-- 变更索引前评估 SQLite 查询计划与性能回归。
+- 不提交真实数据库连接串、用户隐私内容与签名信息。  
+- 测试样例数据需脱敏，不得包含外部可识别账号信息。  
+- 迁移与索引改动需先评估回滚和查询性能影响。  
 
 ## 提交与 PR 规范
 
-- 同步提交 SQLite 迁移、模型变更与测试命令输出。  
-- PR 说明包含迁移影响、兼容性风险、回滚方案。  
-- 提交信息默认中文。
+- 提交信息默认中文，单次变更聚焦模型、迁移或查询能力之一。  
+- PR 需说明 `sqlite` 与默认特性两套验证结果。  
+- 变更 schema 时同步补充 `tests` 与 `migrations` 说明。  
 
 ## 项目特有坑点
 
-- SQLite FTS5、事务、索引和触发器语义对查询行为影响大，改动后需补充回归验证。  
-- `snapshot` 特性依赖 `git2`，禁用默认特性时需显式选择所需能力。
+- SQLite 默认特性与 `--features sqlite` 下行为可能存在差异，查询兼容性需覆盖两条链路。  
+- 快照、版本回放接口与上层 AI / 世界观口径不一致时会导致回放异常。  
 
 ## 文档同步依据（本次核对）
 
-- 同步时间：2026-05-28 18:02:58 +08:00  
-- 依据文件：`core_world_data/Cargo.toml`、`core_world_data/migrations`
+- 同步时间：2026-06-03 21:04:46 +08:00
+- 依据文件：`core_world_data/Cargo.toml`、`core_world_data/src`、`core_world_data/migrations`、`core_world_data/tests`、`core_world_data/.sqlx`
