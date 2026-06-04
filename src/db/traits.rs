@@ -137,6 +137,13 @@ pub trait IdeaNoteOps: Send + Sync {
     async fn delete_idea_note(&self, id: &Uuid) -> Result<()>;
 }
 
+pub trait ProjectSettingOps: Send + Sync {
+    /// 读取项目级设置；不存在返回 None。
+    async fn get_project_setting(&self, project_id: &Uuid, key: &str) -> Result<Option<String>>;
+    /// 写入项目级设置（存在即覆盖）。
+    async fn set_project_setting(&self, project_id: &Uuid, key: &str, value: &str) -> Result<()>;
+}
+
 /// 组合 trait，实现所有子 trait 即自动实现 Db
 pub trait Db:
     ProjectOps
@@ -147,6 +154,7 @@ pub trait Db:
     + EntryLinkOps
     + EntryTypeOps
     + IdeaNoteOps
+    + ProjectSettingOps
 {
 }
 impl<
@@ -157,7 +165,8 @@ impl<
         + EntryRelationOps
         + EntryLinkOps
         + EntryTypeOps
-        + IdeaNoteOps,
+        + IdeaNoteOps
+        + ProjectSettingOps,
 > Db for T
 {
 }

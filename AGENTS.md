@@ -53,5 +53,5 @@ core_world_data/
 
 ## 文档同步依据（本次核对）
 
-- 同步时间：2026-06-03 21:04:46 +08:00
+- 同步时间：2026-06-04 17:03:10 +08:00
 - 依据文件：`core_world_data/Cargo.toml`、`core_world_data/src`、`core_world_data/migrations`、`core_world_data/tests`、`core_world_data/.sqlx`

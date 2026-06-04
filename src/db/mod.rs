@@ -23,6 +23,8 @@ mod idea_note;
 #[cfg(feature = "sqlite")]
 mod project;
 #[cfg(feature = "sqlite")]
+mod project_setting;
+#[cfg(feature = "sqlite")]
 #[cfg(feature = "snapshot")]
 pub(crate) mod snapshot;
 #[cfg(feature = "sqlite")]

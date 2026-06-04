@@ -6,7 +6,7 @@ pub mod models;
 
 pub use db::traits::{
     CategoryOps, Db, EntryLinkOps, EntryOps, EntryRelationOps, EntryTypeOps, IdeaNoteOps,
-    ProjectOps, TagSchemaOps,
+    ProjectOps, ProjectSettingOps, TagSchemaOps,
 };
 pub use error::{Result, WorldflowError};
 
