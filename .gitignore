@@ -4,6 +4,7 @@ worldflow_dev.db
 /worldflow_dev.db-shm
 /worldflow_dev.db
 /.sqlx/
+/.codegraph/
 /.claude/
 /.idea/
 /Cargo.lock
